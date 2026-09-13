@@ -39,6 +39,7 @@ type Task = {
 
 function localDateISO() {
   const now = new Date()
+
   const year = now.getFullYear()
   const month = String(now.getMonth() + 1).padStart(2, '0')
   const day = String(now.getDate()).padStart(2, '0')
@@ -48,7 +49,8 @@ function localDateISO() {
 
 function daysBetween(a: string, b: string) {
   return Math.ceil(
-    (new Date(b).getTime() - new Date(a).getTime()) / 86400000
+    (new Date(b).getTime() - new Date(a).getTime()) /
+      86400000
   )
 }
 
@@ -57,7 +59,10 @@ function health(client: Client, today: string) {
 
   if (client.status === 'launch') score -= 18
   if (client.status === 'website') score -= 10
-  if ((client.outstanding ?? 0) > 0) score -= 10
+
+  if ((client.outstanding ?? 0) > 0) {
+    score -= 10
+  }
 
   if (client.end_date) {
     const daysLeft = daysBetween(today, client.end_date)
@@ -75,14 +80,18 @@ function normalizePriority(
 ): 'high' | 'medium' | 'normal' {
   if (priority === 'high') return 'high'
   if (priority === 'medium') return 'medium'
+
   return 'normal'
 }
 
 export default function Home() {
   const router = useRouter()
 
-  const [checkingAuth, setCheckingAuth] = useState(true)
-  const [loadingData, setLoadingData] = useState(true)
+  const [checkingAuth, setCheckingAuth] =
+    useState(true)
+
+  const [loadingData, setLoadingData] =
+    useState(true)
 
   const [clients, setClients] = useState<Client[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
@@ -107,31 +116,38 @@ export default function Home() {
 
       setCheckingAuth(false)
 
-      const [
-        { data: clientsData, error: clientsError },
-        { data: tasksData, error: tasksError },
-      ] = await Promise.all([
-        supabase
-          .from('clients')
-          .select('*')
-          .order('created_at', { ascending: true }),
+      const clientsResponse = await supabase
+        .from('clients')
+        .select('*')
 
-        supabase
-          .from('tasks')
-          .select('*')
-          .order('due_date', { ascending: true }),
-      ])
+      const tasksResponse = await supabase
+        .from('tasks')
+        .select('*')
 
-      if (clientsError) {
-        console.error('CLIENTS ERROR:', clientsError)
+      if (clientsResponse.error) {
+        console.error(
+          'CLIENTS ERROR:',
+          clientsResponse.error
+        )
+
+        alert(
+          `Clients Error:\n${clientsResponse.error.message}`
+        )
       }
 
-      if (tasksError) {
-        console.error('TASKS ERROR:', tasksError)
+      if (tasksResponse.error) {
+        console.error(
+          'TASKS ERROR:',
+          tasksResponse.error
+        )
+
+        alert(
+          `Tasks Error:\n${tasksResponse.error.message}`
+        )
       }
 
       const loadedClients: Client[] =
-        clientsData || []
+        clientsResponse.data || []
 
       setClients(loadedClients)
 
@@ -143,10 +159,12 @@ export default function Home() {
       )
 
       const loadedTasks: Task[] = (
-        (tasksData || []) as DbTask[]
+        (tasksResponse.data || []) as DbTask[]
       ).map(task => ({
-        id: task.id,
+        id: String(task.id),
+
         text: task.title,
+
         client: task.client_id
           ? clientMap.get(task.client_id) || 'GENERAL'
           : 'GENERAL',
@@ -169,7 +187,7 @@ export default function Home() {
     }
 
     start()
-  }, [router, today])
+  }, [router])
 
   const outstanding = clients.reduce(
     (sum, client) =>
@@ -243,18 +261,20 @@ export default function Home() {
 
     setAddingTask(true)
 
-    const { data, error } = await supabase
+    const {
+      data,
+      error,
+    } = await supabase
       .from('tasks')
       .insert({
         client_id: null,
-        title,
+        title: title,
         description: null,
         due_date: today,
         priority: 'normal',
         status: 'pending',
       })
       .select()
-      .single()
 
     if (error) {
       console.error(
@@ -262,21 +282,48 @@ export default function Home() {
         error
       )
 
-      alert('صار خطأ أثناء إضافة المهمة.')
+      alert(
+        `Supabase Error:\n${error.message}\n\nCode: ${
+          error.code || 'N/A'
+        }`
+      )
+
       setAddingTask(false)
       return
     }
 
+    if (!data || data.length === 0) {
+      alert(
+        'المهمة لم تُحفظ في Supabase.'
+      )
+
+      setAddingTask(false)
+      return
+    }
+
+    const saved = data[0]
+
     const newTask: Task = {
-      id: data.id,
-      text: data.title,
+      id: String(saved.id),
+
+      text: saved.title,
+
       client: 'GENERAL',
-      clientId: null,
-      due: data.due_date || today,
-      priority: normalizePriority(
-        data.priority
-      ),
-      done: false,
+
+      clientId:
+        saved.client_id ?? null,
+
+      due:
+        saved.due_date || today,
+
+      priority:
+        normalizePriority(
+          saved.priority
+        ),
+
+      done:
+        saved.status === 'completed' ||
+        saved.status === 'done',
     }
 
     setTasks(prev => [
@@ -288,13 +335,44 @@ export default function Home() {
     setAddingTask(false)
   }
 
-  const toggle = async (id: string) => {
+  const toggleTask = async (
+    id: string
+  ) => {
     const currentTask =
-      tasks.find(task => task.id === id)
+      tasks.find(
+        task => task.id === id
+      )
 
     if (!currentTask) return
 
-    const newDone = !currentTask.done
+    const newDone =
+      !currentTask.done
+
+    const newStatus =
+      newDone
+        ? 'completed'
+        : 'pending'
+
+    const { error } =
+      await supabase
+        .from('tasks')
+        .update({
+          status: newStatus,
+        })
+        .eq('id', id)
+
+    if (error) {
+      console.error(
+        'UPDATE TASK ERROR:',
+        error
+      )
+
+      alert(
+        `Update Error:\n${error.message}`
+      )
+
+      return
+    }
 
     setTasks(prev =>
       prev.map(task =>
@@ -306,40 +384,17 @@ export default function Home() {
           : task
       )
     )
-
-    const { error } = await supabase
-      .from('tasks')
-      .update({
-        status: newDone
-          ? 'completed'
-          : 'pending',
-      })
-      .eq('id', id)
-
-    if (error) {
-      console.error(
-        'UPDATE TASK ERROR:',
-        error
-      )
-
-      setTasks(prev =>
-        prev.map(task =>
-          task.id === id
-            ? {
-                ...task,
-                done: !newDone,
-              }
-            : task
-        )
-      )
-
-      alert(
-        'صار خطأ أثناء تحديث المهمة.'
-      )
-    }
   }
 
-  if (checkingAuth || loadingData) {
+  const logout = async () => {
+    await supabase.auth.signOut()
+    router.replace('/login')
+  }
+
+  if (
+    checkingAuth ||
+    loadingData
+  ) {
     return (
       <main className="shell">
         <div className="panel">
@@ -369,15 +424,29 @@ export default function Home() {
             </h1>
 
             <p>
-              لوحة تشغيل يومية تمنع التراكم
-              قبل ما يصير مشكلة.
+              لوحة تشغيل يومية تمنع
+              التراكم قبل ما يصير مشكلة.
             </p>
           </div>
         </div>
 
-        <div className="datebox">
-          <b>{today}</b>
-          <span>اليوم</span>
+        <div
+          style={{
+            display: 'flex',
+            gap: 10,
+            alignItems: 'center',
+          }}
+        >
+          <div className="datebox">
+            <b>{today}</b>
+            <span>اليوم</span>
+          </div>
+
+          <button
+            onClick={logout}
+          >
+            تسجيل خروج
+          </button>
         </div>
       </header>
 
@@ -398,7 +467,9 @@ export default function Home() {
         </div>
 
         <div className="metric danger">
-          <small>مهام حرجة</small>
+          <small>
+            مهام حرجة
+          </small>
 
           <strong>
             {urgentCount}
@@ -410,7 +481,9 @@ export default function Home() {
         </div>
 
         <div className="metric warn">
-          <small>مستحقات</small>
+          <small>
+            مستحقات
+          </small>
 
           <strong>
             {outstanding} JD
@@ -449,7 +522,8 @@ export default function Home() {
           </div>
 
           <p className="muted">
-            أهم 3 أشياء لازم تضل قدامك:
+            أهم 3 أشياء لازم تضل
+            قدامك:
           </p>
 
           <ol className="brief">
@@ -472,7 +546,8 @@ export default function Home() {
               }
               onKeyDown={e => {
                 if (
-                  e.key === 'Enter'
+                  e.key ===
+                  'Enter'
                 ) {
                   addTask()
                 }
@@ -485,7 +560,7 @@ export default function Home() {
               disabled={addingTask}
             >
               {addingTask
-                ? 'جاري الإضافة...'
+                ? 'جاري الحفظ...'
                 : '+ أضف مهمة'}
             </button>
           </div>
@@ -504,7 +579,8 @@ export default function Home() {
 
           <div className="loadrow">
             <span>
-              بوستات DH GROWTH شهرياً
+              بوستات DH GROWTH
+              شهرياً
             </span>
 
             <b>
@@ -515,7 +591,8 @@ export default function Home() {
 
           <div className="loadrow">
             <span>
-              ريلز DH GROWTH شهرياً
+              ريلز DH GROWTH
+              شهرياً
             </span>
 
             <b>
@@ -539,13 +616,15 @@ export default function Home() {
               إدارة حملات ومتابعة
             </span>
 
-            <b>يومي</b>
+            <b>
+              يومي
+            </b>
           </div>
 
           <p className="note">
-            الأرقام محسوبة تلقائياً من
-            العملاء الموجودين في قاعدة
-            البيانات.
+            الأرقام محسوبة تلقائياً
+            من العملاء الموجودين
+            في قاعدة البيانات.
           </p>
         </div>
       </section>
@@ -597,51 +676,61 @@ export default function Home() {
         </div>
 
         <div className="tasks">
-          {visibleTasks.length === 0 && (
+          {visibleTasks.length ===
+            0 && (
             <p className="muted">
-              لا توجد مهام بهذا التصنيف.
+              لا توجد مهام بهذا
+              التصنيف.
             </p>
           )}
 
-          {visibleTasks.map(task => (
-            <label
-              key={task.id}
-              className={`task ${
-                task.done
-                  ? 'done'
-                  : ''
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={task.done}
-                onChange={() =>
-                  toggle(task.id)
-                }
-              />
-
-              <div className="taskText">
-                <b>{task.text}</b>
-
-                <span>
-                  {task.client} •{' '}
-                  {task.due}
-                </span>
-              </div>
-
-              <span
-                className={`priority ${task.priority}`}
+          {visibleTasks.map(
+            task => (
+              <label
+                key={task.id}
+                className={`task ${
+                  task.done
+                    ? 'done'
+                    : ''
+                }`}
               >
-                {task.priority ===
-                'high'
-                  ? 'HIGH'
-                  : task.priority ===
-                    'medium'
-                  ? 'MED'
-                  : 'NORMAL'}
-              </span>
-            </label>
-          ))}
+                <input
+                  type="checkbox"
+                  checked={
+                    task.done
+                  }
+                  onChange={() =>
+                    toggleTask(
+                      task.id
+                    )
+                  }
+                />
+
+                <div className="taskText">
+                  <b>
+                    {task.text}
+                  </b>
+
+                  <span>
+                    {task.client} •{' '}
+                    {task.due}
+                  </span>
+                </div>
+
+                <span
+                  className={`priority ${task.priority}`}
+                >
+                  {task.priority ===
+                  'high'
+                    ? 'HIGH'
+                    : task.priority ===
+                      'medium'
+                    ? 'MED'
+                    : 'NORMAL'}
+                </span>
+              </label>
+            )
+          )}
         </div>
       </section>
 
@@ -659,7 +748,10 @@ export default function Home() {
         <div className="clients">
           {clients.map(client => {
             const clientHealth =
-              health(client, today)
+              health(
+                client,
+                today
+              )
 
             return (
               <article
@@ -680,7 +772,8 @@ export default function Home() {
 
                   <div
                     className={`score ${
-                      clientHealth < 80
+                      clientHealth <
+                      80
                         ? 'low'
                         : ''
                     }`}
@@ -712,7 +805,9 @@ export default function Home() {
                   0) > 0 && (
                   <div className="money">
                     متبقي{' '}
-                    {client.outstanding}{' '}
+                    {
+                      client.outstanding
+                    }{' '}
                     JD
                   </div>
                 )}
