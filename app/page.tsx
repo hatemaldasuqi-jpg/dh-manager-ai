@@ -27,6 +27,14 @@ type DbTask = {
   status: string | null
 }
 
+type ContentProgress = {
+  id: string
+  client_id: string
+  posts_done: number
+  reels_done: number
+  stories_done: number
+}
+
 type Priority = 'high' | 'medium' | 'normal'
 
 type Task = {
@@ -50,8 +58,7 @@ function localDateISO() {
 
 function daysBetween(a: string, b: string) {
   return Math.ceil(
-    (new Date(b).getTime() - new Date(a).getTime()) /
-      86400000
+    (new Date(b).getTime() - new Date(a).getTime()) / 86400000
   )
 }
 
@@ -98,6 +105,9 @@ export default function Home() {
   const [tasks, setTasks] =
     useState<Task[]>([])
 
+  const [contentProgress, setContentProgress] =
+    useState<ContentProgress[]>([])
+
   const [taskTitle, setTaskTitle] =
     useState('')
 
@@ -134,6 +144,7 @@ export default function Home() {
       const [
         clientsResponse,
         tasksResponse,
+        contentResponse,
       ] = await Promise.all([
         supabase
           .from('clients')
@@ -145,6 +156,10 @@ export default function Home() {
           .order('due_date', {
             ascending: true,
           }),
+
+        supabase
+          .from('content_progress')
+          .select('*'),
       ])
 
       if (clientsResponse.error) {
@@ -159,10 +174,20 @@ export default function Home() {
         )
       }
 
+      if (contentResponse.error) {
+        alert(
+          `Content Tracker Error:\n${contentResponse.error.message}`
+        )
+      }
+
       const loadedClients: Client[] =
         clientsResponse.data || []
 
       setClients(loadedClients)
+
+      setContentProgress(
+        (contentResponse.data || []) as ContentProgress[]
+      )
 
       const clientMap = new Map(
         loadedClients.map(client => [
@@ -230,7 +255,7 @@ export default function Home() {
   const growthClients = clients.filter(
     client =>
       client.package_name === 'DH GROWTH'
-  ).length
+  )
 
   const visibleTasks = useMemo(() => {
     return tasks.filter(task => {
@@ -286,9 +311,7 @@ export default function Home() {
   const saveTask = async () => {
     const title = taskTitle.trim()
 
-    if (!title || savingTask) {
-      return
-    }
+    if (!title || savingTask) return
 
     setSavingTask(true)
 
@@ -393,9 +416,7 @@ export default function Home() {
 
     if (error) {
       alert(
-        `Supabase Error:\n${error.message}\n\nCode: ${
-          error.code || 'N/A'
-        }`
+        `Supabase Error:\n${error.message}`
       )
 
       setSavingTask(false)
@@ -539,6 +560,151 @@ export default function Home() {
     ) {
       resetTaskForm()
     }
+  }
+
+  const getProgress = (
+    clientId: string
+  ) => {
+    return (
+      contentProgress.find(
+        item =>
+          String(item.client_id) ===
+          String(clientId)
+      ) || null
+    )
+  }
+
+  const updateContent = async (
+    clientId: string,
+    field:
+      | 'posts_done'
+      | 'reels_done'
+      | 'stories_done',
+    change: number
+  ) => {
+    const current =
+      getProgress(clientId)
+
+    const currentPosts =
+      current?.posts_done || 0
+
+    const currentReels =
+      current?.reels_done || 0
+
+    const currentStories =
+      current?.stories_done || 0
+
+    let newPosts = currentPosts
+    let newReels = currentReels
+    let newStories = currentStories
+
+    if (field === 'posts_done') {
+      newPosts = Math.max(
+        0,
+        currentPosts + change
+      )
+    }
+
+    if (field === 'reels_done') {
+      newReels = Math.max(
+        0,
+        currentReels + change
+      )
+    }
+
+    if (field === 'stories_done') {
+      newStories = Math.max(
+        0,
+        currentStories + change
+      )
+    }
+
+    if (current) {
+      const { data, error } =
+        await supabase
+          .from('content_progress')
+          .update({
+            posts_done: newPosts,
+            reels_done: newReels,
+            stories_done: newStories,
+            updated_at:
+              new Date().toISOString(),
+          })
+          .eq('id', current.id)
+          .select()
+          .single()
+
+      if (error) {
+        alert(
+          `Content Update Error:\n${error.message}`
+        )
+
+        return
+      }
+
+      setContentProgress(prev =>
+        prev.map(item =>
+          item.id === current.id
+            ? data
+            : item
+        )
+      )
+
+      return
+    }
+
+    const { data, error } =
+      await supabase
+        .from('content_progress')
+        .insert({
+          client_id: clientId,
+          posts_done: newPosts,
+          reels_done: newReels,
+          stories_done: newStories,
+        })
+        .select()
+        .single()
+
+    if (error) {
+      alert(
+        `Content Insert Error:\n${error.message}`
+      )
+
+      return
+    }
+
+    setContentProgress(prev => [
+      ...prev,
+      data,
+    ])
+  }
+
+  const completionPercent = (
+    progress: ContentProgress | null
+  ) => {
+    const posts =
+      Math.min(
+        progress?.posts_done || 0,
+        growthPackage.posts
+      )
+
+    const reels =
+      Math.min(
+        progress?.reels_done || 0,
+        growthPackage.reels
+      )
+
+    const totalTarget =
+      growthPackage.posts +
+      growthPackage.reels
+
+    const completed =
+      posts + reels
+
+    return Math.round(
+      (completed / totalTarget) *
+        100
+    )
   }
 
   const logout = async () => {
@@ -708,7 +874,7 @@ export default function Home() {
             </span>
 
             <b>
-              {growthClients *
+              {growthClients.length *
                 growthPackage.posts}
             </b>
           </div>
@@ -719,7 +885,7 @@ export default function Home() {
             </span>
 
             <b>
-              {growthClients *
+              {growthClients.length *
                 growthPackage.reels}
             </b>
           </div>
@@ -730,7 +896,8 @@ export default function Home() {
             </span>
 
             <b>
-              {growthClients} حسابات
+              {growthClients.length}{' '}
+              حسابات
             </b>
           </div>
 
@@ -747,6 +914,244 @@ export default function Home() {
       <section className="panel">
         <div className="panelHead">
           <h2>
+            Content Tracker
+          </h2>
+
+          <span className="pill">
+            CONTENT PROGRESS
+          </span>
+        </div>
+
+        <p className="muted">
+          تابع إنجاز محتوى كل عميل
+          DH GROWTH.
+        </p>
+
+        <div
+          style={{
+            display: 'grid',
+            gap: 14,
+            marginTop: 15,
+          }}
+        >
+          {growthClients.map(
+            client => {
+              const progress =
+                getProgress(
+                  client.id
+                )
+
+              const posts =
+                progress?.posts_done ||
+                0
+
+              const reels =
+                progress?.reels_done ||
+                0
+
+              const stories =
+                progress?.stories_done ||
+                0
+
+              const percent =
+                completionPercent(
+                  progress
+                )
+
+              return (
+                <article
+                  key={client.id}
+                  className="client"
+                >
+                  <div className="clientTop">
+                    <div>
+                      <h3>
+                        {client.name}
+                      </h3>
+
+                      <span>
+                        DH GROWTH
+                      </span>
+                    </div>
+
+                    <div className="score">
+                      {percent}%
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns:
+                        'repeat(auto-fit, minmax(150px, 1fr))',
+                      gap: 12,
+                      marginTop: 15,
+                    }}
+                  >
+                    <div className="loadrow">
+                      <span>
+                        Posts
+                      </span>
+
+                      <b>
+                        {posts}/
+                        {
+                          growthPackage.posts
+                        }
+                      </b>
+
+                      <div
+                        style={{
+                          display:
+                            'flex',
+                          gap: 6,
+                        }}
+                      >
+                        <button
+                          onClick={() =>
+                            updateContent(
+                              client.id,
+                              'posts_done',
+                              -1
+                            )
+                          }
+                        >
+                          −
+                        </button>
+
+                        <button
+                          onClick={() =>
+                            updateContent(
+                              client.id,
+                              'posts_done',
+                              1
+                            )
+                          }
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="loadrow">
+                      <span>
+                        Reels
+                      </span>
+
+                      <b>
+                        {reels}/
+                        {
+                          growthPackage.reels
+                        }
+                      </b>
+
+                      <div
+                        style={{
+                          display:
+                            'flex',
+                          gap: 6,
+                        }}
+                      >
+                        <button
+                          onClick={() =>
+                            updateContent(
+                              client.id,
+                              'reels_done',
+                              -1
+                            )
+                          }
+                        >
+                          −
+                        </button>
+
+                        <button
+                          onClick={() =>
+                            updateContent(
+                              client.id,
+                              'reels_done',
+                              1
+                            )
+                          }
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="loadrow">
+                      <span>
+                        Stories
+                      </span>
+
+                      <b>
+                        {stories}
+                      </b>
+
+                      <div
+                        style={{
+                          display:
+                            'flex',
+                          gap: 6,
+                        }}
+                      >
+                        <button
+                          onClick={() =>
+                            updateContent(
+                              client.id,
+                              'stories_done',
+                              -1
+                            )
+                          }
+                        >
+                          −
+                        </button>
+
+                        <button
+                          onClick={() =>
+                            updateContent(
+                              client.id,
+                              'stories_done',
+                              1
+                            )
+                          }
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: 15,
+                      height: 10,
+                      borderRadius: 20,
+                      overflow: 'hidden',
+                      background:
+                        'rgba(255,255,255,0.08)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: `${percent}%`,
+                        height: '100%',
+                        background:
+                          'linear-gradient(90deg,#1677ff,#51a3ff)',
+                        transition:
+                          '0.25s ease',
+                      }}
+                    />
+                  </div>
+                </article>
+              )
+            }
+          )}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panelHead">
+          <h2>
             {editingTaskId
               ? 'تعديل المهمة'
               : 'إضافة مهمة جديدة'}
@@ -754,7 +1159,9 @@ export default function Home() {
 
           {editingTaskId && (
             <button
-              onClick={resetTaskForm}
+              onClick={
+                resetTaskForm
+              }
             >
               إلغاء التعديل
             </button>
@@ -913,7 +1320,9 @@ export default function Home() {
               >
                 <input
                   type="checkbox"
-                  checked={task.done}
+                  checked={
+                    task.done
+                  }
                   onChange={() =>
                     toggleTask(
                       task.id
@@ -946,11 +1355,10 @@ export default function Home() {
 
                 <button
                   onClick={() =>
-                    startEditTask(task)
+                    startEditTask(
+                      task
+                    )
                   }
-                  style={{
-                    marginInlineStart: 8,
-                  }}
                 >
                   تعديل
                 </button>
@@ -959,9 +1367,6 @@ export default function Home() {
                   onClick={() =>
                     deleteTask(task)
                   }
-                  style={{
-                    marginInlineStart: 5,
-                  }}
                 >
                   حذف
                 </button>
