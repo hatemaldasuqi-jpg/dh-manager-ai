@@ -27,19 +27,20 @@ type DbTask = {
   status: string | null
 }
 
+type Priority = 'high' | 'medium' | 'normal'
+
 type Task = {
   id: string
   text: string
   client: string
   clientId: string | null
   due: string
-  priority: 'high' | 'medium' | 'normal'
+  priority: Priority
   done: boolean
 }
 
 function localDateISO() {
   const now = new Date()
-
   const year = now.getFullYear()
   const month = String(now.getMonth() + 1).padStart(2, '0')
   const day = String(now.getDate()).padStart(2, '0')
@@ -59,10 +60,7 @@ function health(client: Client, today: string) {
 
   if (client.status === 'launch') score -= 18
   if (client.status === 'website') score -= 10
-
-  if ((client.outstanding ?? 0) > 0) {
-    score -= 10
-  }
+  if ((client.outstanding ?? 0) > 0) score -= 10
 
   if (client.end_date) {
     const daysLeft = daysBetween(today, client.end_date)
@@ -77,7 +75,7 @@ function health(client: Client, today: string) {
 
 function normalizePriority(
   priority: string | null
-): 'high' | 'medium' | 'normal' {
+): Priority {
   if (priority === 'high') return 'high'
   if (priority === 'medium') return 'medium'
 
@@ -86,6 +84,7 @@ function normalizePriority(
 
 export default function Home() {
   const router = useRouter()
+  const today = localDateISO()
 
   const [checkingAuth, setCheckingAuth] =
     useState(true)
@@ -93,16 +92,32 @@ export default function Home() {
   const [loadingData, setLoadingData] =
     useState(true)
 
-  const [clients, setClients] = useState<Client[]>([])
-  const [tasks, setTasks] = useState<Task[]>([])
+  const [clients, setClients] =
+    useState<Client[]>([])
 
-  const [quickTask, setQuickTask] = useState('')
-  const [addingTask, setAddingTask] = useState(false)
+  const [tasks, setTasks] =
+    useState<Task[]>([])
+
+  const [taskTitle, setTaskTitle] =
+    useState('')
+
+  const [taskClientId, setTaskClientId] =
+    useState('general')
+
+  const [taskDate, setTaskDate] =
+    useState(today)
+
+  const [taskPriority, setTaskPriority] =
+    useState<Priority>('normal')
+
+  const [savingTask, setSavingTask] =
+    useState(false)
+
+  const [editingTaskId, setEditingTaskId] =
+    useState<string | null>(null)
 
   const [filter, setFilter] =
     useState<'all' | 'today' | 'urgent'>('all')
-
-  const today = localDateISO()
 
   useEffect(() => {
     const start = async () => {
@@ -116,31 +131,29 @@ export default function Home() {
 
       setCheckingAuth(false)
 
-      const clientsResponse = await supabase
-        .from('clients')
-        .select('*')
+      const [
+        clientsResponse,
+        tasksResponse,
+      ] = await Promise.all([
+        supabase
+          .from('clients')
+          .select('*'),
 
-      const tasksResponse = await supabase
-        .from('tasks')
-        .select('*')
+        supabase
+          .from('tasks')
+          .select('*')
+          .order('due_date', {
+            ascending: true,
+          }),
+      ])
 
       if (clientsResponse.error) {
-        console.error(
-          'CLIENTS ERROR:',
-          clientsResponse.error
-        )
-
         alert(
           `Clients Error:\n${clientsResponse.error.message}`
         )
       }
 
       if (tasksResponse.error) {
-        console.error(
-          'TASKS ERROR:',
-          tasksResponse.error
-        )
-
         alert(
           `Tasks Error:\n${tasksResponse.error.message}`
         )
@@ -153,7 +166,7 @@ export default function Home() {
 
       const clientMap = new Map(
         loadedClients.map(client => [
-          client.id,
+          String(client.id),
           client.name,
         ])
       )
@@ -166,10 +179,14 @@ export default function Home() {
         text: task.title,
 
         client: task.client_id
-          ? clientMap.get(task.client_id) || 'GENERAL'
+          ? clientMap.get(
+              String(task.client_id)
+            ) || 'GENERAL'
           : 'GENERAL',
 
-        clientId: task.client_id,
+        clientId: task.client_id
+          ? String(task.client_id)
+          : null,
 
         due: task.due_date || today,
 
@@ -191,7 +208,8 @@ export default function Home() {
 
   const outstanding = clients.reduce(
     (sum, client) =>
-      sum + Number(client.outstanding ?? 0),
+      sum +
+      Number(client.outstanding ?? 0),
     0
   )
 
@@ -235,11 +253,14 @@ export default function Home() {
   }, [tasks, filter, today])
 
   const aiBrief = useMemo(() => {
-    const high = tasks
+    const priorityTasks = tasks
       .filter(
         task =>
           !task.done &&
           task.priority === 'high'
+      )
+      .sort((a, b) =>
+        a.due.localeCompare(b.due)
       )
       .slice(0, 3)
       .map(
@@ -247,83 +268,168 @@ export default function Home() {
           `${task.client}: ${task.text}`
       )
 
-    return high.length
-      ? high
+    return priorityTasks.length
+      ? priorityTasks
       : [
-          'لا توجد مهام حرجة الآن. ركّز على المتابعة اليومية والحملات.',
+          'لا توجد مهام حرجة حالياً. تابع الحملات والمحتوى اليومي.',
         ]
   }, [tasks])
 
-  const addTask = async () => {
-    const title = quickTask.trim()
+  const resetTaskForm = () => {
+    setTaskTitle('')
+    setTaskClientId('general')
+    setTaskDate(today)
+    setTaskPriority('normal')
+    setEditingTaskId(null)
+  }
 
-    if (!title || addingTask) return
+  const saveTask = async () => {
+    const title = taskTitle.trim()
 
-    setAddingTask(true)
+    if (!title || savingTask) {
+      return
+    }
 
-    const {
-      data,
-      error,
-    } = await supabase
-      .from('tasks')
-      .insert({
-        client_id: null,
-        title: title,
-        description: null,
-        due_date: today,
-        priority: 'normal',
-        status: 'pending',
-      })
-      .select()
+    setSavingTask(true)
 
-    if (error) {
-      console.error(
-        'ADD TASK ERROR:',
-        error
+    const payload = {
+      client_id:
+        taskClientId === 'general'
+          ? null
+          : taskClientId,
+
+      title,
+
+      description: null,
+
+      due_date: taskDate,
+
+      priority: taskPriority,
+
+      status: 'pending',
+    }
+
+    if (editingTaskId) {
+      const { data, error } =
+        await supabase
+          .from('tasks')
+          .update({
+            client_id:
+              payload.client_id,
+
+            title: payload.title,
+
+            due_date:
+              payload.due_date,
+
+            priority:
+              payload.priority,
+          })
+          .eq('id', editingTaskId)
+          .select()
+          .single()
+
+      if (error) {
+        alert(
+          `Update Error:\n${error.message}`
+        )
+
+        setSavingTask(false)
+        return
+      }
+
+      const clientName =
+        payload.client_id
+          ? clients.find(
+              client =>
+                String(client.id) ===
+                String(
+                  payload.client_id
+                )
+            )?.name || 'GENERAL'
+          : 'GENERAL'
+
+      setTasks(prev =>
+        prev.map(task =>
+          task.id === editingTaskId
+            ? {
+                ...task,
+
+                text: data.title,
+
+                client: clientName,
+
+                clientId:
+                  data.client_id
+                    ? String(
+                        data.client_id
+                      )
+                    : null,
+
+                due:
+                  data.due_date ||
+                  today,
+
+                priority:
+                  normalizePriority(
+                    data.priority
+                  ),
+              }
+            : task
+        )
       )
 
+      resetTaskForm()
+      setSavingTask(false)
+      return
+    }
+
+    const { data, error } =
+      await supabase
+        .from('tasks')
+        .insert(payload)
+        .select()
+        .single()
+
+    if (error) {
       alert(
         `Supabase Error:\n${error.message}\n\nCode: ${
           error.code || 'N/A'
         }`
       )
 
-      setAddingTask(false)
+      setSavingTask(false)
       return
     }
 
-    if (!data || data.length === 0) {
-      alert(
-        'المهمة لم تُحفظ في Supabase.'
-      )
-
-      setAddingTask(false)
-      return
-    }
-
-    const saved = data[0]
+    const clientName =
+      data.client_id
+        ? clients.find(
+            client =>
+              String(client.id) ===
+              String(data.client_id)
+          )?.name || 'GENERAL'
+        : 'GENERAL'
 
     const newTask: Task = {
-      id: String(saved.id),
+      id: String(data.id),
 
-      text: saved.title,
+      text: data.title,
 
-      client: 'GENERAL',
+      client: clientName,
 
-      clientId:
-        saved.client_id ?? null,
+      clientId: data.client_id
+        ? String(data.client_id)
+        : null,
 
-      due:
-        saved.due_date || today,
+      due: data.due_date || today,
 
       priority:
         normalizePriority(
-          saved.priority
+          data.priority
         ),
 
-      done:
-        saved.status === 'completed' ||
-        saved.status === 'done',
+      done: false,
     }
 
     setTasks(prev => [
@@ -331,8 +437,27 @@ export default function Home() {
       ...prev,
     ])
 
-    setQuickTask('')
-    setAddingTask(false)
+    resetTaskForm()
+    setSavingTask(false)
+  }
+
+  const startEditTask = (
+    task: Task
+  ) => {
+    setEditingTaskId(task.id)
+    setTaskTitle(task.text)
+
+    setTaskClientId(
+      task.clientId || 'general'
+    )
+
+    setTaskDate(task.due)
+    setTaskPriority(task.priority)
+
+    window.scrollTo({
+      top: 0,
+      behavior: 'smooth',
+    })
   }
 
   const toggleTask = async (
@@ -348,25 +473,17 @@ export default function Home() {
     const newDone =
       !currentTask.done
 
-    const newStatus =
-      newDone
-        ? 'completed'
-        : 'pending'
-
     const { error } =
       await supabase
         .from('tasks')
         .update({
-          status: newStatus,
+          status: newDone
+            ? 'completed'
+            : 'pending',
         })
         .eq('id', id)
 
     if (error) {
-      console.error(
-        'UPDATE TASK ERROR:',
-        error
-      )
-
       alert(
         `Update Error:\n${error.message}`
       )
@@ -384,6 +501,44 @@ export default function Home() {
           : task
       )
     )
+  }
+
+  const deleteTask = async (
+    task: Task
+  ) => {
+    const confirmed =
+      window.confirm(
+        `حذف المهمة؟\n\n${task.text}`
+      )
+
+    if (!confirmed) return
+
+    const { error } =
+      await supabase
+        .from('tasks')
+        .delete()
+        .eq('id', task.id)
+
+    if (error) {
+      alert(
+        `Delete Error:\n${error.message}`
+      )
+
+      return
+    }
+
+    setTasks(prev =>
+      prev.filter(
+        item =>
+          item.id !== task.id
+      )
+    )
+
+    if (
+      editingTaskId === task.id
+    ) {
+      resetTaskForm()
+    }
   }
 
   const logout = async () => {
@@ -504,7 +659,7 @@ export default function Home() {
           </strong>
 
           <span>
-            قبل شهر 11
+            الهدف المالي
           </span>
         </div>
       </section>
@@ -522,8 +677,7 @@ export default function Home() {
           </div>
 
           <p className="muted">
-            أهم 3 أشياء لازم تضل
-            قدامك:
+            أهم المهام الحرجة الحالية:
           </p>
 
           <ol className="brief">
@@ -535,35 +689,6 @@ export default function Home() {
               )
             )}
           </ol>
-
-          <div className="quick">
-            <input
-              value={quickTask}
-              onChange={e =>
-                setQuickTask(
-                  e.target.value
-                )
-              }
-              onKeyDown={e => {
-                if (
-                  e.key ===
-                  'Enter'
-                ) {
-                  addTask()
-                }
-              }}
-              placeholder="مثال: تصوير WATAD الخميس"
-            />
-
-            <button
-              onClick={addTask}
-              disabled={addingTask}
-            >
-              {addingTask
-                ? 'جاري الحفظ...'
-                : '+ أضف مهمة'}
-            </button>
-          </div>
         </div>
 
         <div className="panel">
@@ -579,8 +704,7 @@ export default function Home() {
 
           <div className="loadrow">
             <span>
-              بوستات DH GROWTH
-              شهرياً
+              بوستات DH GROWTH شهرياً
             </span>
 
             <b>
@@ -591,8 +715,7 @@ export default function Home() {
 
           <div className="loadrow">
             <span>
-              ريلز DH GROWTH
-              شهرياً
+              ريلز DH GROWTH شهرياً
             </span>
 
             <b>
@@ -616,16 +739,110 @@ export default function Home() {
               إدارة حملات ومتابعة
             </span>
 
-            <b>
-              يومي
-            </b>
+            <b>يومي</b>
           </div>
+        </div>
+      </section>
 
-          <p className="note">
-            الأرقام محسوبة تلقائياً
-            من العملاء الموجودين
-            في قاعدة البيانات.
-          </p>
+      <section className="panel">
+        <div className="panelHead">
+          <h2>
+            {editingTaskId
+              ? 'تعديل المهمة'
+              : 'إضافة مهمة جديدة'}
+          </h2>
+
+          {editingTaskId && (
+            <button
+              onClick={resetTaskForm}
+            >
+              إلغاء التعديل
+            </button>
+          )}
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns:
+              'repeat(auto-fit, minmax(160px, 1fr))',
+            gap: 10,
+            marginTop: 15,
+          }}
+        >
+          <input
+            value={taskTitle}
+            onChange={e =>
+              setTaskTitle(
+                e.target.value
+              )
+            }
+            placeholder="اسم المهمة"
+          />
+
+          <select
+            value={taskClientId}
+            onChange={e =>
+              setTaskClientId(
+                e.target.value
+              )
+            }
+          >
+            <option value="general">
+              مهمة عامة
+            </option>
+
+            {clients.map(client => (
+              <option
+                key={client.id}
+                value={client.id}
+              >
+                {client.name}
+              </option>
+            ))}
+          </select>
+
+          <input
+            type="date"
+            value={taskDate}
+            onChange={e =>
+              setTaskDate(
+                e.target.value
+              )
+            }
+          />
+
+          <select
+            value={taskPriority}
+            onChange={e =>
+              setTaskPriority(
+                e.target.value as Priority
+              )
+            }
+          >
+            <option value="normal">
+              Normal
+            </option>
+
+            <option value="medium">
+              Medium
+            </option>
+
+            <option value="high">
+              High
+            </option>
+          </select>
+
+          <button
+            onClick={saveTask}
+            disabled={savingTask}
+          >
+            {savingTask
+              ? 'جاري الحفظ...'
+              : editingTaskId
+              ? 'حفظ التعديل'
+              : '+ إضافة المهمة'}
+          </button>
         </div>
       </section>
 
@@ -686,7 +903,7 @@ export default function Home() {
 
           {visibleTasks.map(
             task => (
-              <label
+              <div
                 key={task.id}
                 className={`task ${
                   task.done
@@ -696,9 +913,7 @@ export default function Home() {
               >
                 <input
                   type="checkbox"
-                  checked={
-                    task.done
-                  }
+                  checked={task.done}
                   onChange={() =>
                     toggleTask(
                       task.id
@@ -728,7 +943,29 @@ export default function Home() {
                     ? 'MED'
                     : 'NORMAL'}
                 </span>
-              </label>
+
+                <button
+                  onClick={() =>
+                    startEditTask(task)
+                  }
+                  style={{
+                    marginInlineStart: 8,
+                  }}
+                >
+                  تعديل
+                </button>
+
+                <button
+                  onClick={() =>
+                    deleteTask(task)
+                  }
+                  style={{
+                    marginInlineStart: 5,
+                  }}
+                >
+                  حذف
+                </button>
+              </div>
             )
           )}
         </div>
