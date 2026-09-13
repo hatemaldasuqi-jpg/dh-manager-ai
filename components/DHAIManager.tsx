@@ -1,0 +1,7 @@
+'use client'
+import {useState} from 'react'
+export default function DHAIManager({context}:{context:unknown}){
+ const[q,setQ]=useState(''),[a,setA]=useState(''),[busy,setBusy]=useState(false)
+ const ask=async(p?:string)=>{const x=(p||q).trim();if(!x||busy)return;setQ(x);setBusy(true);setA('');try{const r=await fetch('/api/ai',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:x,context})});const d=await r.json();if(!r.ok)throw new Error(d.error||'تعذر الرد');setA(d.answer)}catch(e:any){setA('خطأ: '+e.message)}finally{setBusy(false)}}
+ return <section className="panel aiManager"><div className="panelHead"><div><h2>مدير DH AI</h2><p>تحليل حي لبيانات الشركة الحالية.</p></div><span className="pill">OPENAI</span></div><div className="aiQuick"><button onClick={()=>ask('شو أهم شغلات لازم أعملها اليوم؟')}>شو أعمل اليوم؟</button><button onClick={()=>ask('مين العملاء اللي لازم أتابع معهم أو أحصل منهم دفعات؟')}>التحصيل والمتابعة</button><button onClick={()=>ask('حلل وضع المحتوى وحدد مين محتاج اهتمام أولاً.')}>حلل المحتوى</button><button onClick={()=>ask('اعطيني ملخص إداري سريع لوضع DH Agency الآن.')}>ملخص الشركة</button></div><div className="aiAsk"><textarea rows={3} value={q} onChange={e=>setQ(e.target.value)} placeholder="اسأل مدير DH AI..."/><button onClick={()=>ask()} disabled={busy||!q.trim()}>{busy?'DH AI يفكر...':'اسأل مدير DH AI'}</button></div>{a&&<div className="aiAnswer">{a}</div>}</section>
+}
