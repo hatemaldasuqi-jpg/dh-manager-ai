@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
-import { clients, growthPackage } from '../lib/data'
+import { growthPackage } from '../lib/data'
 
 type Task = {
   id: number
@@ -12,6 +12,18 @@ type Task = {
   due: string
   priority: 'high' | 'medium' | 'normal'
   done: boolean
+}
+
+type Client = {
+  id: string
+  name: string
+  package_name: string | null
+  project_type: string | null
+  start_date: string | null
+  end_date: string | null
+  outstanding: number | null
+  status: string | null
+  notes: string | null
 }
 
 const initialTasks: Task[] = [
@@ -67,7 +79,6 @@ const initialTasks: Task[] = [
 
 function localDateISO() {
   const now = new Date()
-
   const year = now.getFullYear()
   const month = String(now.getMonth() + 1).padStart(2, '0')
   const day = String(now.getDate()).padStart(2, '0')
@@ -81,16 +92,17 @@ function daysBetween(a: string, b: string) {
   )
 }
 
-function health(client: (typeof clients)[number], today: string) {
+function health(client: Client, today: string) {
   let score = 100
 
   if (client.status === 'launch') score -= 18
   if (client.status === 'website') score -= 10
-  if (client.outstanding > 0) score -= 10
+  if ((client.outstanding ?? 0) > 0) score -= 10
 
-  const daysLeft = daysBetween(today, client.end)
-
-  if (daysLeft <= 7) score -= 8
+  if (client.end_date) {
+    const daysLeft = daysBetween(today, client.end_date)
+    if (daysLeft <= 7) score -= 8
+  }
 
   return Math.max(0, score)
 }
@@ -99,6 +111,8 @@ export default function Home() {
   const router = useRouter()
 
   const [checkingAuth, setCheckingAuth] = useState(true)
+  const [loadingClients, setLoadingClients] = useState(true)
+  const [clients, setClients] = useState<Client[]>([])
   const [tasks, setTasks] = useState(initialTasks)
   const [quickTask, setQuickTask] = useState('')
   const [filter, setFilter] = useState<'all' | 'today' | 'urgent'>('all')
@@ -120,8 +134,28 @@ export default function Home() {
     checkAuth()
   }, [router])
 
+  useEffect(() => {
+    const loadClients = async () => {
+      const { data, error } = await supabase
+        .from('clients')
+        .select('*')
+        .order('created_at', { ascending: true })
+
+      if (error) {
+        console.error('CLIENTS ERROR:', error)
+        setLoadingClients(false)
+        return
+      }
+
+      setClients(data || [])
+      setLoadingClients(false)
+    }
+
+    loadClients()
+  }, [])
+
   const outstanding = clients.reduce(
-    (sum, client) => sum + client.outstanding,
+    (sum, client) => sum + Number(client.outstanding ?? 0),
     0
   )
 
@@ -130,7 +164,11 @@ export default function Home() {
   ).length
 
   const activeSocial = clients.filter(
-    client => client.packageName !== 'WEBSITE'
+    client => client.package_name !== 'WEBSITE'
+  ).length
+
+  const growthClients = clients.filter(
+    client => client.package_name === 'DH GROWTH'
   ).length
 
   const visibleTasks = useMemo(() => {
@@ -189,11 +227,11 @@ export default function Home() {
     )
   }
 
-  if (checkingAuth) {
+  if (checkingAuth || loadingClients) {
     return (
       <main className="shell">
         <div className="panel">
-          جاري التحقق من تسجيل الدخول...
+          جاري تحميل بيانات DH Manager AI...
         </div>
       </main>
     )
@@ -234,7 +272,7 @@ export default function Home() {
         <div className="metric">
           <small>العملاء / المشاريع</small>
           <strong>{clients.length}</strong>
-          <span>{activeSocial} سوشال + 1 ويبسايت</span>
+          <span>{activeSocial} سوشال + {clients.length - activeSocial} ويبسايت</span>
         </div>
 
         <div className="metric danger">
@@ -297,17 +335,17 @@ export default function Home() {
 
           <div className="loadrow">
             <span>بوستات DH GROWTH شهرياً</span>
-            <b>70</b>
+            <b>{growthClients * growthPackage.posts}</b>
           </div>
 
           <div className="loadrow">
             <span>ريلز DH GROWTH شهرياً</span>
-            <b>35</b>
+            <b>{growthClients * growthPackage.reels}</b>
           </div>
 
           <div className="loadrow">
             <span>ستوري يومي</span>
-            <b>7 حسابات</b>
+            <b>{growthClients} حسابات</b>
           </div>
 
           <div className="loadrow">
@@ -316,7 +354,7 @@ export default function Home() {
           </div>
 
           <p className="note">
-            الرقم هذا يوضح ليش لازم التشغيل يصير بنظام، مش بالذاكرة.
+            الرقم هذا محسوب مباشرة من عدد عملاء DH GROWTH الموجودين في قاعدة البيانات.
           </p>
         </div>
       </section>
@@ -397,12 +435,12 @@ export default function Home() {
             return (
               <article
                 className="client"
-                key={client.name}
+                key={client.id}
               >
                 <div className="clientTop">
                   <div>
                     <h3>{client.name}</h3>
-                    <span>{client.packageName}</span>
+                    <span>{client.package_name || 'بدون باقة'}</span>
                   </div>
 
                   <div
@@ -414,20 +452,25 @@ export default function Home() {
                   </div>
                 </div>
 
-                <p>{client.notes}</p>
+                <p>{client.notes || 'لا توجد ملاحظات'}</p>
 
                 <div className="dates">
-                  <span>من {client.start}</span>
-                  <span>إلى {client.end}</span>
+                  <span>
+                    من {client.start_date || 'غير محدد'}
+                  </span>
+
+                  <span>
+                    إلى {client.end_date || 'غير محدد'}
+                  </span>
                 </div>
 
-                {client.outstanding > 0 && (
+                {(client.outstanding ?? 0) > 0 && (
                   <div className="money">
                     متبقي {client.outstanding} JD
                   </div>
                 )}
 
-                {client.packageName === 'DH GROWTH' && (
+                {client.package_name === 'DH GROWTH' && (
                   <div className="quota">
                     {growthPackage.posts} Posts •{' '}
                     {growthPackage.reels} Reels • Daily Story
