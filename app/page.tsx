@@ -67,10 +67,13 @@ export default function Home() {
   return (
     <main className="shell">
       <header className="topbar">
-        <div>
-          <div className="eyebrow">DH AGENCY • OPERATIONS</div>
-          <h1>DH Manager <span>AI</span></h1>
-          <p>لوحة تشغيل يومية تمنع التراكم قبل ما يصير مشكلة.</p>
+        <div className="brandWrap">
+          <img className="brandLogo" src="/dh-agency-logo.jpeg" alt="DH Agency logo" />
+          <div>
+            <div className="eyebrow">DH AGENCY • OPERATIONS</div>
+            <h1>DH Manager <span>AI</span></h1>
+            <p>لوحة تشغيل يومية تمنع التراكم قبل ما يصير مشكلة.</p>
+          </div>
         </div>
         <div className="datebox"><b>13 SEP 2026</b><span>الأحد</span></div>
       </header>
@@ -133,6 +136,16 @@ export default function Home() {
           })}
         </div>
       </section>
+
+      <footer className="ownerFooter">
+        <div className="signatureBlock">
+          <span className="signatureLabel">Founder & Owner</span>
+          <div className="signature">Hatem Al Dasuqi</div>
+          <div className="signatureName">HATEM AL DASUQI</div>
+          <div className="signatureLine" />
+          <small>DH AGENCY</small>
+        </div>
+      </footer>
     </main>
   )
 }
