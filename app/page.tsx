@@ -1,102 +1,2158 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
-
-type Package={id:string;name:string;price:number|null;posts_target:number;reels_target:number;daily_story:boolean;notes:string|null}
-type Client={id:string;name:string;package_id:string|null;package_name:string|null;project_type:string|null;start_date:string|null;end_date:string|null;outstanding:number|null;status:string|null;notes:string|null;phone:string|null;contract_value:number|null}
-type Task={id:string;client_id:string|null;title:string;due_date:string|null;priority:string|null;status:string|null}
-type Progress={id:string;client_id:string;posts_done:number;reels_done:number;stories_done:number}
-type Tx={id:string;client_id:string|null;type:'income'|'expense'|'freelancer';amount:number;title:string;transaction_date:string;notes:string|null}
-type Appt={id:string;client_id:string|null;title:string;appointment_date:string;appointment_time:string|null;notes:string|null;status:string}
-const iso=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
-const n=(x:any)=>Number(x||0)
-const clamp=(x:number,a=0,b=100)=>Math.max(a,Math.min(b,x))
-
-export default function Home(){
- const router=useRouter(), today=iso()
- const [loading,setLoading]=useState(true),[clients,setClients]=useState<Client[]>([]),[packages,setPackages]=useState<Package[]>([]),[tasks,setTasks]=useState<Task[]>([]),[progress,setProgress]=useState<Progress[]>([]),[txs,setTxs]=useState<Tx[]>([]),[appts,setAppts]=useState<Appt[]>([])
- const [tab,setTab]=useState('overview')
- const [task,setTask]=useState({title:'',client_id:'',due_date:today,priority:'normal'})
- const [client,setClient]=useState({name:'',package_id:'',start_date:today,end_date:'',outstanding:'',status:'active',notes:'',phone:'',contract_value:''})
- const [pkg,setPkg]=useState({name:'',price:'',posts_target:'0',reels_target:'0',daily_story:false,notes:''})
- const [tx,setTx]=useState({title:'',client_id:'',type:'income',amount:'',transaction_date:today,notes:''})
- const [appt,setAppt]=useState({title:'',client_id:'',appointment_date:today,appointment_time:'',notes:''})
- const cname=(id:string|null)=>clients.find(c=>c.id===id)?.name||'عام'
- const pack=(c:Client)=>packages.find(p=>p.id===c.package_id)||packages.find(p=>p.name===c.package_name)
- const reload=async()=>{
-  const session=(await supabase.auth.getSession()).data.session
-  if(!session){router.replace('/login');return}
-  const [a,b,c,d,e,f]=await Promise.all([
-   supabase.from('clients').select('*').order('created_at'),
-   supabase.from('packages').select('*').order('created_at'),
-   supabase.from('tasks').select('*').order('due_date'),
-   supabase.from('content_progress').select('*'),
-   supabase.from('financial_transactions').select('*').order('transaction_date',{ascending:false}),
-   supabase.from('appointments').select('*').order('appointment_date')
-  ])
-  const err=[a,b,c,d,e,f].find(x=>x.error)?.error
-  if(err) alert(err.message)
-  setClients((a.data||[]) as Client[]);setPackages((b.data||[]) as Package[]);setTasks((c.data||[]) as Task[]);setProgress((d.data||[]) as Progress[]);setTxs((e.data||[]) as Tx[]);setAppts((f.data||[]) as Appt[]);setLoading(false)
- }
- useEffect(()=>{reload()},[])
- const income=txs.filter(x=>x.type==='income').reduce((s,x)=>s+n(x.amount),0), expenses=txs.filter(x=>x.type!=='income').reduce((s,x)=>s+n(x.amount),0), profit=income-expenses
- const outstanding=clients.reduce((s,c)=>s+n(c.outstanding),0), goal=3000, goalPct=clamp(Math.round(profit/goal*100))
- const urgent=tasks.filter(t=>t.status!=='completed'&&t.priority==='high'), overdue=tasks.filter(t=>t.status!=='completed'&&t.due_date&&t.due_date<today)
- const todayAppts=appts.filter(a=>a.status==='pending'&&a.appointment_date===today)
- const contentRisk=clients.filter(c=>{const p=pack(c);if(!p||(p.posts_target+p.reels_target===0))return false;const q=progress.find(x=>x.client_id===c.id);const done=n(q?.posts_done)+n(q?.reels_done), target=p.posts_target+p.reels_target;return done/target<.35})
- const focus=[...overdue.slice(0,2).map(t=>`متأخر: ${cname(t.client_id)} — ${t.title}`),...todayAppts.slice(0,2).map(a=>`موعد اليوم: ${cname(a.client_id)} — ${a.title}`),...contentRisk.slice(0,2).map(c=>`راجع محتوى ${c.name}`),...urgent.slice(0,2).map(t=>`أولوية: ${cname(t.client_id)} — ${t.title}`)].slice(0,5)
- const add=async(table:string,payload:any,reset:()=>void)=>{const {error}=await supabase.from(table).insert(payload);if(error)return alert(error.message);reset();await reload()}
- const del=async(table:string,id:string)=>{if(!confirm('متأكد من الحذف؟'))return;const {error}=await supabase.from(table).delete().eq('id',id);if(error)return alert(error.message);await reload()}
- const toggleTask=async(t:Task)=>{await supabase.from('tasks').update({status:t.status==='completed'?'pending':'completed'}).eq('id',t.id);await reload()}
- const changeProgress=async(c:Client,field:'posts_done'|'reels_done'|'stories_done',delta:number)=>{
-  const q=progress.find(x=>x.client_id===c.id)
-  if(!q){const base:any={client_id:c.id,posts_done:0,reels_done:0,stories_done:0};base[field]=Math.max(0,delta);const {error}=await supabase.from('content_progress').insert(base);if(error)return alert(error.message)}
-  else {const val=Math.max(0,n((q as any)[field])+delta);const {error}=await supabase.from('content_progress').update({[field]:val,updated_at:new Date().toISOString()}).eq('id',q.id);if(error)return alert(error.message)}
-  await reload()
- }
- const health=(c:Client)=>{let s=100;if(n(c.outstanding)>0)s-=10;if(overdue.some(t=>t.client_id===c.id))s-=20;if(contentRisk.some(x=>x.id===c.id))s-=15;if(c.end_date&&c.end_date<today)s-=20;return clamp(s)}
- if(loading)return <main className="shell"><div className="panel">جاري تحميل DH Manager AI...</div></main>
- return <main className="shell">
-  <header className="topbar"><div className="brandWrap"><img className="brandLogo" src="/dh-agency-logo.jpeg" alt="DH Agency"/><div><div className="eyebrow">DH AGENCY • OPERATIONS</div><h1>DH Manager <span>AI</span></h1><p>نظام تشغيل وإدارة DH Agency</p></div></div><div className="datebox"><b>{today}</b><button onClick={async()=>{await supabase.auth.signOut();router.replace('/login')}}>خروج</button></div></header>
-  <nav className="nav">{[['overview','الرئيسية'],['tasks','المهام'],['content','المحتوى'],['finance','المالية'],['calendar','المواعيد'],['clients','العملاء'],['packages','الباقات']].map(x=><button key={x[0]} className={tab===x[0]?'active':''} onClick={()=>setTab(x[0])}>{x[1]}</button>)}</nav>
-
-  {tab==='overview'&&<>
-   <section className="metrics"><div className="metric"><small>العملاء</small><strong>{clients.length}</strong><span>مشاريع نشطة</span></div><div className="metric danger"><small>متأخر/حرج</small><strong>{overdue.length+urgent.length}</strong><span>تحتاج انتباه</span></div><div className="metric warn"><small>المستحقات</small><strong>{outstanding} JD</strong><span>مسجلة حالياً</span></div><div className="metric"><small>صافي الربح</small><strong>{profit} JD</strong><span>{goalPct}% من هدف {goal}</span></div></section>
-   <section className="grid2"><div className="panel ai"><div className="panelHead"><h2>Daily Focus</h2><span className="pill">SMART BRIEF</span></div>{focus.length?<ol className="brief">{focus.map((x,i)=><li key={i}>{x}</li>)}</ol>:<p>الوضع هادئ اليوم. تابع الحملات والتواصل.</p>}</div><div className="panel"><h2>المالية</h2><div className="loadrow"><span>دخل</span><b>{income} JD</b></div><div className="loadrow"><span>مصاريف + فريلانسر</span><b>{expenses} JD</b></div><div className="loadrow"><span>صافي</span><b>{profit} JD</b></div><div className="bar"><i style={{width:`${goalPct}%`}}/></div></div></section>
-   <section className="panel"><h2>Client Health</h2><div className="clients">{clients.map(c=><article className="client" key={c.id}><div className="clientTop"><div><h3>{c.name}</h3><span>{pack(c)?.name||c.package_name||'بدون باقة'}</span></div><div className={`score ${health(c)<80?'low':''}`}>{health(c)}</div></div><p>{c.notes||'لا توجد ملاحظات'}</p>{n(c.outstanding)>0&&<div className="money">متبقي {c.outstanding} JD</div>}</article>)}</div></section>
-  </>}
-
-  {tab==='tasks'&&<section className="panel"><h2>إدارة المهام</h2><div className="form"><input placeholder="المهمة" value={task.title} onChange={e=>setTask({...task,title:e.target.value})}/><select value={task.client_id} onChange={e=>setTask({...task,client_id:e.target.value})}><option value="">عام</option>{clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select><input type="date" value={task.due_date} onChange={e=>setTask({...task,due_date:e.target.value})}/><select value={task.priority} onChange={e=>setTask({...task,priority:e.target.value})}><option value="normal">Normal</option><option value="medium">Medium</option><option value="high">High</option></select><button onClick={()=>add('tasks',{...task,client_id:task.client_id||null,status:'pending'},()=>setTask({title:'',client_id:'',due_date:today,priority:'normal'}))}>إضافة</button></div><div className="tasks">{tasks.map(t=><div className={`task ${t.status==='completed'?'done':''}`} key={t.id}><input type="checkbox" checked={t.status==='completed'} onChange={()=>toggleTask(t)}/><div className="taskText"><b>{t.title}</b><span>{cname(t.client_id)} • {t.due_date||'بدون تاريخ'}</span></div><span className={`priority ${t.priority}`}>{t.priority}</span><button onClick={()=>del('tasks',t.id)}>حذف</button></div>)}</div></section>}
-
-  {tab==='content'&&<section className="panel"><h2>Content Tracker</h2><div className="clients">{clients.filter(c=>{const p=pack(c);return p&&(p.posts_target>0||p.reels_target>0||p.daily_story)}).map(c=>{const p=pack(c)!;const q=progress.find(x=>x.client_id===c.id);const posts=n(q?.posts_done),reels=n(q?.reels_done),stories=n(q?.stories_done),target=p.posts_target+p.reels_target, pct=target?clamp(Math.round((Math.min(posts,p.posts_target)+Math.min(reels,p.reels_target))/target*100)):0;return <article className="client" key={c.id}><div className="clientTop"><div><h3>{c.name}</h3><span>{p.name}</span></div><div className="score">{pct}%</div></div><div className="tracker"><div><b>Posts {posts}/{p.posts_target}</b><button onClick={()=>changeProgress(c,'posts_done',-1)}>−</button><button onClick={()=>changeProgress(c,'posts_done',1)}>+</button></div><div><b>Reels {reels}/{p.reels_target}</b><button onClick={()=>changeProgress(c,'reels_done',-1)}>−</button><button onClick={()=>changeProgress(c,'reels_done',1)}>+</button></div>{p.daily_story&&<div><b>Stories {stories}</b><button onClick={()=>changeProgress(c,'stories_done',-1)}>−</button><button onClick={()=>changeProgress(c,'stories_done',1)}>+</button></div>}</div><div className="bar"><i style={{width:`${pct}%`}}/></div></article>})}</div></section>}
-
-  {tab==='finance'&&<section className="panel"><h2>Financial Tracker</h2><div className="metrics mini"><div className="metric"><small>الدخل</small><strong>{income}</strong></div><div className="metric warn"><small>المصاريف</small><strong>{expenses}</strong></div><div className="metric"><small>الصافي</small><strong>{profit}</strong></div><div className="metric"><small>الهدف</small><strong>{goalPct}%</strong></div></div><div className="form"><input placeholder="البيان" value={tx.title} onChange={e=>setTx({...tx,title:e.target.value})}/><select value={tx.type} onChange={e=>setTx({...tx,type:e.target.value})}><option value="income">دخل</option><option value="expense">مصروف</option><option value="freelancer">فريلانسر</option></select><input type="number" placeholder="المبلغ" value={tx.amount} onChange={e=>setTx({...tx,amount:e.target.value})}/><select value={tx.client_id} onChange={e=>setTx({...tx,client_id:e.target.value})}><option value="">بدون عميل</option>{clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select><input type="date" value={tx.transaction_date} onChange={e=>setTx({...tx,transaction_date:e.target.value})}/><button onClick={()=>add('financial_transactions',{...tx,client_id:tx.client_id||null,amount:n(tx.amount)},()=>setTx({title:'',client_id:'',type:'income',amount:'',transaction_date:today,notes:''}))}>حفظ</button></div><div className="list">{txs.map(x=><div className="row" key={x.id}><b>{x.title}</b><span>{x.type} • {x.amount} JD • {x.transaction_date} • {cname(x.client_id)}</span><button onClick={()=>del('financial_transactions',x.id)}>حذف</button></div>)}</div></section>}
-
-  {tab==='calendar'&&<section className="panel"><h2>المواعيد</h2><div className="form"><input placeholder="اسم الموعد" value={appt.title} onChange={e=>setAppt({...appt,title:e.target.value})}/><select value={appt.client_id} onChange={e=>setAppt({...appt,client_id:e.target.value})}><option value="">عام</option>{clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select><input type="date" value={appt.appointment_date} onChange={e=>setAppt({...appt,appointment_date:e.target.value})}/><input type="time" value={appt.appointment_time} onChange={e=>setAppt({...appt,appointment_time:e.target.value})}/><input placeholder="ملاحظات" value={appt.notes} onChange={e=>setAppt({...appt,notes:e.target.value})}/><button onClick={()=>add('appointments',{...appt,client_id:appt.client_id||null,appointment_time:appt.appointment_time||null,status:'pending'},()=>setAppt({title:'',client_id:'',appointment_date:today,appointment_time:'',notes:''}))}>إضافة</button></div><div className="list">{appts.map(a=><div className="row" key={a.id}><b>{a.title}</b><span>{cname(a.client_id)} • {a.appointment_date} {a.appointment_time||''}</span><button onClick={async()=>{await supabase.from('appointments').update({status:a.status==='completed'?'pending':'completed'}).eq('id',a.id);reload()}}>{a.status==='completed'?'إرجاع':'تم'}</button><button onClick={()=>del('appointments',a.id)}>حذف</button></div>)}</div></section>}
-
-  {tab==='clients'&&<section className="panel"><h2>العملاء</h2><div className="form"><input placeholder="اسم العميل" value={client.name} onChange={e=>setClient({...client,name:e.target.value})}/><select value={client.package_id} onChange={e=>setClient({...client,package_id:e.target.value})}><option value="">اختر الباقة</option>{packages.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select><input type="date" value={client.start_date} onChange={e=>setClient({...client,start_date:e.target.value})}/><input type="date" value={client.end_date} onChange={e=>setClient({...client,end_date:e.target.value})}/><input type="number" placeholder="قيمة العقد" value={client.contract_value} onChange={e=>setClient({...client,contract_value:e.target.value})}/><input type="number" placeholder="المتبقي" value={client.outstanding} onChange={e=>setClient({...client,outstanding:e.target.value})}/><input placeholder="هاتف" value={client.phone} onChange={e=>setClient({...client,phone:e.target.value})}/><input placeholder="ملاحظات" value={client.notes} onChange={e=>setClient({...client,notes:e.target.value})}/><button onClick={()=>{const p=packages.find(x=>x.id===client.package_id);add('clients',{...client,package_id:client.package_id||null,package_name:p?.name||null,project_type:p?.name==='WEBSITE'?'website':'social',outstanding:client.outstanding===''?null:n(client.outstanding),contract_value:client.contract_value===''?null:n(client.contract_value)},()=>setClient({name:'',package_id:'',start_date:today,end_date:'',outstanding:'',status:'active',notes:'',phone:'',contract_value:''}))}}>إضافة عميل</button></div><div className="clients">{clients.map(c=><article className="client" key={c.id}><div className="clientTop"><div><h3>{c.name}</h3><span>{pack(c)?.name||'بدون باقة'}</span></div><div className="score">{health(c)}</div></div><p>{c.start_date||'—'} → {c.end_date||'—'} • عقد {c.contract_value??'—'} JD • متبقي {c.outstanding??'غير مسجل'} JD</p><button onClick={()=>del('clients',c.id)}>حذف العميل</button></article>)}</div></section>}
-
-  {tab==='packages'&&<section className="panel"><h2>إدارة الباقات</h2><div className="form"><input placeholder="اسم الباقة" value={pkg.name} onChange={e=>setPkg({...pkg,name:e.target.value})}/><input type="number" placeholder="السعر" value={pkg.price} onChange={e=>setPkg({...pkg,price:e.target.value})}/><input type="number" placeholder="عدد البوستات" value={pkg.posts_target} onChange={e=>setPkg({...pkg,posts_target:e.target.value})}/><input type="number" placeholder="عدد الريلز" value={pkg.reels_target} onChange={e=>setPkg({...pkg,reels_target:e.target.value})}/><label className="check"><input type="checkbox" checked={pkg.daily_story} onChange={e=>setPkg({...pkg,daily_story:e.target.checked})}/> ستوري يومي</label><input placeholder="ملاحظات" value={pkg.notes} onChange={e=>setPkg({...pkg,notes:e.target.value})}/><button onClick={()=>add('packages',{name:pkg.name,price:pkg.price===''?null:n(pkg.price),posts_target:n(pkg.posts_target),reels_target:n(pkg.reels_target),daily_story:pkg.daily_story,notes:pkg.notes||null},()=>setPkg({name:'',price:'',posts_target:'0',reels_target:'0',daily_story:false,notes:''}))}>إضافة باقة</button></div><div className="clients">{packages.map(p=><article className="client" key={p.id}><h3>{p.name}</h3><p>{p.price??'—'} JD • {p.posts_target} Posts • {p.reels_target} Reels • {p.daily_story?'Daily Story':'No Daily Story'}</p><button onClick={()=>del('packages',p.id)}>حذف</button></article>)}</div></section>}
-  <footer className="ownerFooter"><div className="signatureBlock"><span className="signatureLabel">Founder & Owner</span><div className="signature">Hatem Al Dasuqi</div><div className="signatureName">HATEM AL DASUQI</div><div className="signatureLine"/><small>DH AGENCY</small></div></footer>
- </main>
-}
-AI UPDATE — 2 files + 3 small inserts
-
-Upload:
-app/api/ai/route.ts
-components/DHAIManager.tsx
-
-In app/page.tsx add at top:
 import DHAIManager from '../components/DHAIManager'
 
-Inside Home(), after financial totals/goal variables, add:
-const aiContext={today,clients,packages,tasks,contentProgress:progress,financialTransactions:txs,appointments:appts,summary:{income,expenses,netProfit:profit,outstanding,savingsGoal:goal}}
+type Package = {
+  id: string
+  name: string
+  price: number | null
+  posts_target: number
+  reels_target: number
+  daily_story: boolean
+  notes: string | null
+}
 
-Inside the overview section, before Client Health, add:
-<DHAIManager context={aiContext}/>
+type Client = {
+  id: string
+  name: string
+  package_id: string | null
+  package_name: string | null
+  project_type: string | null
+  start_date: string | null
+  end_date: string | null
+  outstanding: number | null
+  status: string | null
+  notes: string | null
+  phone: string | null
+  contract_value: number | null
+}
 
-At the end of app/globals.css add:
-.aiManager p{margin:5px 0 0}.aiQuick{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}.aiAsk{display:grid;grid-template-columns:1fr auto;gap:9px}.aiAsk textarea{width:100%;resize:vertical;background:#0a111f;color:white;border:1px solid #263651;border-radius:12px;padding:12px;font:inherit}.aiAnswer{white-space:pre-wrap;line-height:1.9;background:#08111f;border:1px solid #23436d;border-radius:14px;padding:15px;margin-top:12px}@media(max-width:720px){.aiAsk{grid-template-columns:1fr}.aiAsk button{width:100%}}
+type Task = {
+  id: string
+  client_id: string | null
+  title: string
+  due_date: string | null
+  priority: string | null
+  status: string | null
+}
 
-Keep OPENAI_API_KEY only in Vercel Secret Environment Variables. Never put it in GitHub or NEXT_PUBLIC_.
+type Progress = {
+  id: string
+  client_id: string
+  posts_done: number
+  reels_done: number
+  stories_done: number
+}
+
+type Tx = {
+  id: string
+  client_id: string | null
+  type: 'income' | 'expense' | 'freelancer'
+  amount: number
+  title: string
+  transaction_date: string
+  notes: string | null
+}
+
+type Appt = {
+  id: string
+  client_id: string | null
+  title: string
+  appointment_date: string
+  appointment_time: string | null
+  notes: string | null
+  status: string
+}
+
+const iso = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+    d.getDate()
+  ).padStart(2, '0')}`
+}
+
+const n = (x: any) => Number(x || 0)
+
+const clamp = (x: number, a = 0, b = 100) =>
+  Math.max(a, Math.min(b, x))
+
+export default function Home() {
+  const router = useRouter()
+  const today = iso()
+
+  const [loading, setLoading] = useState(true)
+  const [clients, setClients] = useState<Client[]>([])
+  const [packages, setPackages] = useState<Package[]>([])
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [progress, setProgress] = useState<Progress[]>([])
+  const [txs, setTxs] = useState<Tx[]>([])
+  const [appts, setAppts] = useState<Appt[]>([])
+
+  const [tab, setTab] = useState('overview')
+
+  const [task, setTask] = useState({
+    title: '',
+    client_id: '',
+    due_date: today,
+    priority: 'normal',
+  })
+
+  const [client, setClient] = useState({
+    name: '',
+    package_id: '',
+    start_date: today,
+    end_date: '',
+    outstanding: '',
+    status: 'active',
+    notes: '',
+    phone: '',
+    contract_value: '',
+  })
+
+  const [pkg, setPkg] = useState({
+    name: '',
+    price: '',
+    posts_target: '0',
+    reels_target: '0',
+    daily_story: false,
+    notes: '',
+  })
+
+  const [tx, setTx] = useState({
+    title: '',
+    client_id: '',
+    type: 'income',
+    amount: '',
+    transaction_date: today,
+    notes: '',
+  })
+
+  const [appt, setAppt] = useState({
+    title: '',
+    client_id: '',
+    appointment_date: today,
+    appointment_time: '',
+    notes: '',
+  })
+
+  const cname = (id: string | null) =>
+    clients.find((c) => c.id === id)?.name || 'عام'
+
+  const pack = (c: Client) =>
+    packages.find((p) => p.id === c.package_id) ||
+    packages.find((p) => p.name === c.package_name)
+
+  const reload = async () => {
+    const session = (await supabase.auth.getSession()).data.session
+
+    if (!session) {
+      router.replace('/login')
+      return
+    }
+
+    const [a, b, c, d, e, f] = await Promise.all([
+      supabase.from('clients').select('*').order('created_at'),
+      supabase.from('packages').select('*').order('created_at'),
+      supabase.from('tasks').select('*').order('due_date'),
+      supabase.from('content_progress').select('*'),
+      supabase
+        .from('financial_transactions')
+        .select('*')
+        .order('transaction_date', { ascending: false }),
+      supabase.from('appointments').select('*').order('appointment_date'),
+    ])
+
+    const err = [a, b, c, d, e, f].find((x) => x.error)?.error
+
+    if (err) alert(err.message)
+
+    setClients((a.data || []) as Client[])
+    setPackages((b.data || []) as Package[])
+    setTasks((c.data || []) as Task[])
+    setProgress((d.data || []) as Progress[])
+    setTxs((e.data || []) as Tx[])
+    setAppts((f.data || []) as Appt[])
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    reload()
+  }, [])
+
+  const income = txs
+    .filter((x) => x.type === 'income')
+    .reduce((s, x) => s + n(x.amount), 0)
+
+  const expenses = txs
+    .filter((x) => x.type !== 'income')
+    .reduce((s, x) => s + n(x.amount), 0)
+
+  const profit = income - expenses
+
+  const outstanding = clients.reduce(
+    (s, c) => s + n(c.outstanding),
+    0
+  )
+
+  const goal = 3000
+
+  const goalPct = clamp(
+    Math.round((profit / goal) * 100)
+  )
+
+  // ==============================
+  // DH AI CONTEXT
+  // ==============================
+
+  const aiContext = {
+    today,
+
+    clients: clients.map((c) => ({
+      id: c.id,
+      name: c.name,
+      package: pack(c)?.name || c.package_name || null,
+      packageDetails: pack(c)
+        ? {
+            price: pack(c)?.price,
+            postsTarget: pack(c)?.posts_target,
+            reelsTarget: pack(c)?.reels_target,
+            dailyStory: pack(c)?.daily_story,
+          }
+        : null,
+      projectType: c.project_type,
+      contractStart: c.start_date,
+      contractEnd: c.end_date,
+      contractValue: c.contract_value,
+      outstanding: c.outstanding,
+      status: c.status,
+      phone: c.phone,
+      notes: c.notes,
+    })),
+
+    tasks: tasks.map((t) => ({
+      id: t.id,
+      client: cname(t.client_id),
+      title: t.title,
+      dueDate: t.due_date,
+      priority: t.priority,
+      status: t.status,
+    })),
+
+    contentProgress: progress.map((p) => {
+      const c = clients.find(
+        (clientItem) => clientItem.id === p.client_id
+      )
+
+      const clientPackage = c ? pack(c) : undefined
+
+      return {
+        client: c?.name || 'Unknown',
+        postsDone: p.posts_done,
+        postsTarget: clientPackage?.posts_target ?? null,
+        reelsDone: p.reels_done,
+        reelsTarget: clientPackage?.reels_target ?? null,
+        storiesDone: p.stories_done,
+        dailyStory: clientPackage?.daily_story ?? false,
+      }
+    }),
+
+    financialTransactions: txs.map((x) => ({
+      client: cname(x.client_id),
+      type: x.type,
+      amount: x.amount,
+      title: x.title,
+      date: x.transaction_date,
+      notes: x.notes,
+    })),
+
+    appointments: appts.map((a) => ({
+      client: cname(a.client_id),
+      title: a.title,
+      date: a.appointment_date,
+      time: a.appointment_time,
+      status: a.status,
+      notes: a.notes,
+    })),
+
+    financialSummary: {
+      income,
+      expenses,
+      netProfit: profit,
+      outstanding,
+      savingsGoal: goal,
+      goalProgressPercent: goalPct,
+    },
+  }
+
+  const urgent = tasks.filter(
+    (t) =>
+      t.status !== 'completed' &&
+      t.priority === 'high'
+  )
+
+  const overdue = tasks.filter(
+    (t) =>
+      t.status !== 'completed' &&
+      t.due_date &&
+      t.due_date < today
+  )
+
+  const todayAppts = appts.filter(
+    (a) =>
+      a.status === 'pending' &&
+      a.appointment_date === today
+  )
+
+  const contentRisk = clients.filter((c) => {
+    const p = pack(c)
+
+    if (!p || p.posts_target + p.reels_target === 0) {
+      return false
+    }
+
+    const q = progress.find(
+      (x) => x.client_id === c.id
+    )
+
+    const done =
+      n(q?.posts_done) + n(q?.reels_done)
+
+    const target =
+      p.posts_target + p.reels_target
+
+    return done / target < 0.35
+  })
+
+  const focus = [
+    ...overdue
+      .slice(0, 2)
+      .map(
+        (t) =>
+          `متأخر: ${cname(t.client_id)} — ${t.title}`
+      ),
+
+    ...todayAppts
+      .slice(0, 2)
+      .map(
+        (a) =>
+          `موعد اليوم: ${cname(a.client_id)} — ${a.title}`
+      ),
+
+    ...contentRisk
+      .slice(0, 2)
+      .map(
+        (c) =>
+          `راجع محتوى ${c.name}`
+      ),
+
+    ...urgent
+      .slice(0, 2)
+      .map(
+        (t) =>
+          `أولوية: ${cname(t.client_id)} — ${t.title}`
+      ),
+  ].slice(0, 5)
+
+  const add = async (
+    table: string,
+    payload: any,
+    reset: () => void
+  ) => {
+    const { error } = await supabase
+      .from(table)
+      .insert(payload)
+
+    if (error) {
+      alert(error.message)
+      return
+    }
+
+    reset()
+    await reload()
+  }
+
+  const del = async (
+    table: string,
+    id: string
+  ) => {
+    if (!confirm('متأكد من الحذف؟')) return
+
+    const { error } = await supabase
+      .from(table)
+      .delete()
+      .eq('id', id)
+
+    if (error) {
+      alert(error.message)
+      return
+    }
+
+    await reload()
+  }
+
+  const toggleTask = async (t: Task) => {
+    const { error } = await supabase
+      .from('tasks')
+      .update({
+        status:
+          t.status === 'completed'
+            ? 'pending'
+            : 'completed',
+      })
+      .eq('id', t.id)
+
+    if (error) {
+      alert(error.message)
+      return
+    }
+
+    await reload()
+  }
+
+  const changeProgress = async (
+    c: Client,
+    field:
+      | 'posts_done'
+      | 'reels_done'
+      | 'stories_done',
+    delta: number
+  ) => {
+    const q = progress.find(
+      (x) => x.client_id === c.id
+    )
+
+    if (!q) {
+      const base: any = {
+        client_id: c.id,
+        posts_done: 0,
+        reels_done: 0,
+        stories_done: 0,
+      }
+
+      base[field] = Math.max(0, delta)
+
+      const { error } = await supabase
+        .from('content_progress')
+        .insert(base)
+
+      if (error) {
+        alert(error.message)
+        return
+      }
+    } else {
+      const val = Math.max(
+        0,
+        n((q as any)[field]) + delta
+      )
+
+      const { error } = await supabase
+        .from('content_progress')
+        .update({
+          [field]: val,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', q.id)
+
+      if (error) {
+        alert(error.message)
+        return
+      }
+    }
+
+    await reload()
+  }
+
+  const health = (c: Client) => {
+    let s = 100
+
+    if (n(c.outstanding) > 0) s -= 10
+
+    if (
+      overdue.some(
+        (t) => t.client_id === c.id
+      )
+    )
+      s -= 20
+
+    if (
+      contentRisk.some(
+        (x) => x.id === c.id
+      )
+    )
+      s -= 15
+
+    if (
+      c.end_date &&
+      c.end_date < today
+    )
+      s -= 20
+
+    return clamp(s)
+  }
+
+  if (loading) {
+    return (
+      <main className="shell">
+        <div className="panel">
+          جاري تحميل DH Manager AI...
+        </div>
+      </main>
+    )
+  }
+
+  return (
+    <main className="shell">
+
+      <header className="topbar">
+
+        <div className="brandWrap">
+
+          <img
+            className="brandLogo"
+            src="/dh-agency-logo.jpeg"
+            alt="DH Agency"
+          />
+
+          <div>
+
+            <div className="eyebrow">
+              DH AGENCY • OPERATIONS
+            </div>
+
+            <h1>
+              DH Manager <span>AI</span>
+            </h1>
+
+            <p>
+              نظام تشغيل وإدارة DH Agency
+            </p>
+
+          </div>
+
+        </div>
+
+        <div className="datebox">
+
+          <b>{today}</b>
+
+          <button
+            onClick={async () => {
+              await supabase.auth.signOut()
+              router.replace('/login')
+            }}
+          >
+            خروج
+          </button>
+
+        </div>
+
+      </header>
+
+      <nav className="nav">
+
+        {[
+          ['overview', 'الرئيسية'],
+          ['tasks', 'المهام'],
+          ['content', 'المحتوى'],
+          ['finance', 'المالية'],
+          ['calendar', 'المواعيد'],
+          ['clients', 'العملاء'],
+          ['packages', 'الباقات'],
+        ].map((x) => (
+
+          <button
+            key={x[0]}
+            className={
+              tab === x[0]
+                ? 'active'
+                : ''
+            }
+            onClick={() =>
+              setTab(x[0])
+            }
+          >
+            {x[1]}
+          </button>
+
+        ))}
+
+      </nav>
+
+      {tab === 'overview' && (
+        <>
+
+          <section className="metrics">
+
+            <div className="metric">
+
+              <small>العملاء</small>
+
+              <strong>
+                {clients.length}
+              </strong>
+
+              <span>
+                مشاريع نشطة
+              </span>
+
+            </div>
+
+            <div className="metric danger">
+
+              <small>
+                متأخر/حرج
+              </small>
+
+              <strong>
+                {overdue.length +
+                  urgent.length}
+              </strong>
+
+              <span>
+                تحتاج انتباه
+              </span>
+
+            </div>
+
+            <div className="metric warn">
+
+              <small>
+                المستحقات
+              </small>
+
+              <strong>
+                {outstanding} JD
+              </strong>
+
+              <span>
+                مسجلة حالياً
+              </span>
+
+            </div>
+
+            <div className="metric">
+
+              <small>
+                صافي الربح
+              </small>
+
+              <strong>
+                {profit} JD
+              </strong>
+
+              <span>
+                {goalPct}% من هدف {goal}
+              </span>
+
+            </div>
+
+          </section>
+
+          <section className="grid2">
+
+            <div className="panel ai">
+
+              <div className="panelHead">
+
+                <h2>
+                  Daily Focus
+                </h2>
+
+                <span className="pill">
+                  SMART BRIEF
+                </span>
+
+              </div>
+
+              {focus.length ? (
+
+                <ol className="brief">
+
+                  {focus.map(
+                    (x, i) => (
+                      <li key={i}>
+                        {x}
+                      </li>
+                    )
+                  )}
+
+                </ol>
+
+              ) : (
+
+                <p>
+                  الوضع هادئ اليوم.
+                  تابع الحملات والتواصل.
+                </p>
+
+              )}
+
+            </div>
+
+            <div className="panel">
+
+              <h2>
+                المالية
+              </h2>
+
+              <div className="loadrow">
+                <span>دخل</span>
+                <b>{income} JD</b>
+              </div>
+
+              <div className="loadrow">
+                <span>
+                  مصاريف + فريلانسر
+                </span>
+                <b>{expenses} JD</b>
+              </div>
+
+              <div className="loadrow">
+                <span>صافي</span>
+                <b>{profit} JD</b>
+              </div>
+
+              <div className="bar">
+                <i
+                  style={{
+                    width: `${goalPct}%`,
+                  }}
+                />
+              </div>
+
+            </div>
+
+          </section>
+
+          {/* =========================
+              REAL DH AI MANAGER
+          ========================== */}
+
+          <DHAIManager
+            context={aiContext}
+          />
+
+          {/* ========================= */}
+
+          <section className="panel">
+
+            <h2>
+              Client Health
+            </h2>
+
+            <div className="clients">
+
+              {clients.map((c) => (
+
+                <article
+                  className="client"
+                  key={c.id}
+                >
+
+                  <div className="clientTop">
+
+                    <div>
+
+                      <h3>
+                        {c.name}
+                      </h3>
+
+                      <span>
+                        {pack(c)?.name ||
+                          c.package_name ||
+                          'بدون باقة'}
+                      </span>
+
+                    </div>
+
+                    <div
+                      className={`score ${
+                        health(c) < 80
+                          ? 'low'
+                          : ''
+                      }`}
+                    >
+                      {health(c)}
+                    </div>
+
+                  </div>
+
+                  <p>
+                    {c.notes ||
+                      'لا توجد ملاحظات'}
+                  </p>
+
+                  {n(c.outstanding) >
+                    0 && (
+
+                    <div className="money">
+                      متبقي{' '}
+                      {c.outstanding} JD
+                    </div>
+
+                  )}
+
+                </article>
+
+              ))}
+
+            </div>
+
+          </section>
+
+        </>
+      )}
+
+      {tab === 'tasks' && (
+
+        <section className="panel">
+
+          <h2>
+            إدارة المهام
+          </h2>
+
+          <div className="form">
+
+            <input
+              placeholder="المهمة"
+              value={task.title}
+              onChange={(e) =>
+                setTask({
+                  ...task,
+                  title:
+                    e.target.value,
+                })
+              }
+            />
+
+            <select
+              value={task.client_id}
+              onChange={(e) =>
+                setTask({
+                  ...task,
+                  client_id:
+                    e.target.value,
+                })
+              }
+            >
+
+              <option value="">
+                عام
+              </option>
+
+              {clients.map((c) => (
+
+                <option
+                  key={c.id}
+                  value={c.id}
+                >
+                  {c.name}
+                </option>
+
+              ))}
+
+            </select>
+
+            <input
+              type="date"
+              value={task.due_date}
+              onChange={(e) =>
+                setTask({
+                  ...task,
+                  due_date:
+                    e.target.value,
+                })
+              }
+            />
+
+            <select
+              value={task.priority}
+              onChange={(e) =>
+                setTask({
+                  ...task,
+                  priority:
+                    e.target.value,
+                })
+              }
+            >
+
+              <option value="normal">
+                Normal
+              </option>
+
+              <option value="medium">
+                Medium
+              </option>
+
+              <option value="high">
+                High
+              </option>
+
+            </select>
+
+            <button
+              onClick={() =>
+                add(
+                  'tasks',
+                  {
+                    ...task,
+                    client_id:
+                      task.client_id ||
+                      null,
+                    status: 'pending',
+                  },
+                  () =>
+                    setTask({
+                      title: '',
+                      client_id: '',
+                      due_date: today,
+                      priority:
+                        'normal',
+                    })
+                )
+              }
+            >
+              إضافة
+            </button>
+
+          </div>
+
+          <div className="tasks">
+
+            {tasks.map((t) => (
+
+              <div
+                className={`task ${
+                  t.status ===
+                  'completed'
+                    ? 'done'
+                    : ''
+                }`}
+                key={t.id}
+              >
+
+                <input
+                  type="checkbox"
+                  checked={
+                    t.status ===
+                    'completed'
+                  }
+                  onChange={() =>
+                    toggleTask(t)
+                  }
+                />
+
+                <div className="taskText">
+
+                  <b>
+                    {t.title}
+                  </b>
+
+                  <span>
+                    {cname(
+                      t.client_id
+                    )}{' '}
+                    •{' '}
+                    {t.due_date ||
+                      'بدون تاريخ'}
+                  </span>
+
+                </div>
+
+                <span
+                  className={`priority ${t.priority}`}
+                >
+                  {t.priority}
+                </span>
+
+                <button
+                  onClick={() =>
+                    del(
+                      'tasks',
+                      t.id
+                    )
+                  }
+                >
+                  حذف
+                </button>
+
+              </div>
+
+            ))}
+
+          </div>
+
+        </section>
+
+      )}
+
+      {tab === 'content' && (
+
+        <section className="panel">
+
+          <h2>
+            Content Tracker
+          </h2>
+
+          <div className="clients">
+
+            {clients
+              .filter((c) => {
+
+                const p =
+                  pack(c)
+
+                return (
+                  p &&
+                  (p.posts_target >
+                    0 ||
+                    p.reels_target >
+                      0 ||
+                    p.daily_story)
+                )
+
+              })
+              .map((c) => {
+
+                const p =
+                  pack(c)!
+
+                const q =
+                  progress.find(
+                    (x) =>
+                      x.client_id ===
+                      c.id
+                  )
+
+                const posts = n(
+                  q?.posts_done
+                )
+
+                const reels = n(
+                  q?.reels_done
+                )
+
+                const stories = n(
+                  q?.stories_done
+                )
+
+                const target =
+                  p.posts_target +
+                  p.reels_target
+
+                const pct = target
+                  ? clamp(
+                      Math.round(
+                        ((Math.min(
+                          posts,
+                          p.posts_target
+                        ) +
+                          Math.min(
+                            reels,
+                            p.reels_target
+                          )) /
+                          target) *
+                          100
+                      )
+                    )
+                  : 0
+
+                return (
+
+                  <article
+                    className="client"
+                    key={c.id}
+                  >
+
+                    <div className="clientTop">
+
+                      <div>
+
+                        <h3>
+                          {c.name}
+                        </h3>
+
+                        <span>
+                          {p.name}
+                        </span>
+
+                      </div>
+
+                      <div className="score">
+                        {pct}%
+                      </div>
+
+                    </div>
+
+                    <div className="tracker">
+
+                      <div>
+
+                        <b>
+                          Posts {posts}/
+                          {
+                            p.posts_target
+                          }
+                        </b>
+
+                        <button
+                          onClick={() =>
+                            changeProgress(
+                              c,
+                              'posts_done',
+                              -1
+                            )
+                          }
+                        >
+                          −
+                        </button>
+
+                        <button
+                          onClick={() =>
+                            changeProgress(
+                              c,
+                              'posts_done',
+                              1
+                            )
+                          }
+                        >
+                          +
+                        </button>
+
+                      </div>
+
+                      <div>
+
+                        <b>
+                          Reels {reels}/
+                          {
+                            p.reels_target
+                          }
+                        </b>
+
+                        <button
+                          onClick={() =>
+                            changeProgress(
+                              c,
+                              'reels_done',
+                              -1
+                            )
+                          }
+                        >
+                          −
+                        </button>
+
+                        <button
+                          onClick={() =>
+                            changeProgress(
+                              c,
+                              'reels_done',
+                              1
+                            )
+                          }
+                        >
+                          +
+                        </button>
+
+                      </div>
+
+                      {p.daily_story && (
+
+                        <div>
+
+                          <b>
+                            Stories{' '}
+                            {stories}
+                          </b>
+
+                          <button
+                            onClick={() =>
+                              changeProgress(
+                                c,
+                                'stories_done',
+                                -1
+                              )
+                            }
+                          >
+                            −
+                          </button>
+
+                          <button
+                            onClick={() =>
+                              changeProgress(
+                                c,
+                                'stories_done',
+                                1
+                              )
+                            }
+                          >
+                            +
+                          </button>
+
+                        </div>
+
+                      )}
+
+                    </div>
+
+                    <div className="bar">
+
+                      <i
+                        style={{
+                          width: `${pct}%`,
+                        }}
+                      />
+
+                    </div>
+
+                  </article>
+
+                )
+
+              })}
+
+          </div>
+
+        </section>
+
+      )}
+
+      {tab === 'finance' && (
+
+        <section className="panel">
+
+          <h2>
+            Financial Tracker
+          </h2>
+
+          <div className="metrics mini">
+
+            <div className="metric">
+
+              <small>
+                الدخل
+              </small>
+
+              <strong>
+                {income}
+              </strong>
+
+            </div>
+
+            <div className="metric warn">
+
+              <small>
+                المصاريف
+              </small>
+
+              <strong>
+                {expenses}
+              </strong>
+
+            </div>
+
+            <div className="metric">
+
+              <small>
+                الصافي
+              </small>
+
+              <strong>
+                {profit}
+              </strong>
+
+            </div>
+
+            <div className="metric">
+
+              <small>
+                الهدف
+              </small>
+
+              <strong>
+                {goalPct}%
+              </strong>
+
+            </div>
+
+          </div>
+
+          <div className="form">
+
+            <input
+              placeholder="البيان"
+              value={tx.title}
+              onChange={(e) =>
+                setTx({
+                  ...tx,
+                  title:
+                    e.target.value,
+                })
+              }
+            />
+
+            <select
+              value={tx.type}
+              onChange={(e) =>
+                setTx({
+                  ...tx,
+                  type:
+                    e.target.value,
+                })
+              }
+            >
+
+              <option value="income">
+                دخل
+              </option>
+
+              <option value="expense">
+                مصروف
+              </option>
+
+              <option value="freelancer">
+                فريلانسر
+              </option>
+
+            </select>
+
+            <input
+              type="number"
+              placeholder="المبلغ"
+              value={tx.amount}
+              onChange={(e) =>
+                setTx({
+                  ...tx,
+                  amount:
+                    e.target.value,
+                })
+              }
+            />
+
+            <select
+              value={tx.client_id}
+              onChange={(e) =>
+                setTx({
+                  ...tx,
+                  client_id:
+                    e.target.value,
+                })
+              }
+            >
+
+              <option value="">
+                بدون عميل
+              </option>
+
+              {clients.map((c) => (
+
+                <option
+                  key={c.id}
+                  value={c.id}
+                >
+                  {c.name}
+                </option>
+
+              ))}
+
+            </select>
+
+            <input
+              type="date"
+              value={
+                tx.transaction_date
+              }
+              onChange={(e) =>
+                setTx({
+                  ...tx,
+                  transaction_date:
+                    e.target.value,
+                })
+              }
+            />
+
+            <button
+              onClick={() =>
+                add(
+                  'financial_transactions',
+                  {
+                    ...tx,
+                    client_id:
+                      tx.client_id ||
+                      null,
+                    amount: n(
+                      tx.amount
+                    ),
+                  },
+                  () =>
+                    setTx({
+                      title: '',
+                      client_id: '',
+                      type: 'income',
+                      amount: '',
+                      transaction_date:
+                        today,
+                      notes: '',
+                    })
+                )
+              }
+            >
+              حفظ
+            </button>
+
+          </div>
+
+          <div className="list">
+
+            {txs.map((x) => (
+
+              <div
+                className="row"
+                key={x.id}
+              >
+
+                <b>
+                  {x.title}
+                </b>
+
+                <span>
+                  {x.type} •{' '}
+                  {x.amount} JD •{' '}
+                  {
+                    x.transaction_date
+                  }{' '}
+                  •{' '}
+                  {cname(
+                    x.client_id
+                  )}
+                </span>
+
+                <button
+                  onClick={() =>
+                    del(
+                      'financial_transactions',
+                      x.id
+                    )
+                  }
+                >
+                  حذف
+                </button>
+
+              </div>
+
+            ))}
+
+          </div>
+
+        </section>
+
+      )}
+
+      {tab === 'calendar' && (
+
+        <section className="panel">
+
+          <h2>
+            المواعيد
+          </h2>
+
+          <div className="form">
+
+            <input
+              placeholder="اسم الموعد"
+              value={appt.title}
+              onChange={(e) =>
+                setAppt({
+                  ...appt,
+                  title:
+                    e.target.value,
+                })
+              }
+            />
+
+            <select
+              value={
+                appt.client_id
+              }
+              onChange={(e) =>
+                setAppt({
+                  ...appt,
+                  client_id:
+                    e.target.value,
+                })
+              }
+            >
+
+              <option value="">
+                عام
+              </option>
+
+              {clients.map((c) => (
+
+                <option
+                  key={c.id}
+                  value={c.id}
+                >
+                  {c.name}
+                </option>
+
+              ))}
+
+            </select>
+
+            <input
+              type="date"
+              value={
+                appt.appointment_date
+              }
+              onChange={(e) =>
+                setAppt({
+                  ...appt,
+                  appointment_date:
+                    e.target.value,
+                })
+              }
+            />
+
+            <input
+              type="time"
+              value={
+                appt.appointment_time
+              }
+              onChange={(e) =>
+                setAppt({
+                  ...appt,
+                  appointment_time:
+                    e.target.value,
+                })
+              }
+            />
+
+            <input
+              placeholder="ملاحظات"
+              value={appt.notes}
+              onChange={(e) =>
+                setAppt({
+                  ...appt,
+                  notes:
+                    e.target.value,
+                })
+              }
+            />
+
+            <button
+              onClick={() =>
+                add(
+                  'appointments',
+                  {
+                    ...appt,
+                    client_id:
+                      appt.client_id ||
+                      null,
+                    appointment_time:
+                      appt.appointment_time ||
+                      null,
+                    status:
+                      'pending',
+                  },
+                  () =>
+                    setAppt({
+                      title: '',
+                      client_id: '',
+                      appointment_date:
+                        today,
+                      appointment_time:
+                        '',
+                      notes: '',
+                    })
+                )
+              }
+            >
+              إضافة
+            </button>
+
+          </div>
+
+          <div className="list">
+
+            {appts.map((a) => (
+
+              <div
+                className="row"
+                key={a.id}
+              >
+
+                <b>
+                  {a.title}
+                </b>
+
+                <span>
+                  {cname(
+                    a.client_id
+                  )}{' '}
+                  •{' '}
+                  {
+                    a.appointment_date
+                  }{' '}
+                  {a.appointment_time ||
+                    ''}
+                </span>
+
+                <button
+                  onClick={async () => {
+
+                    const { error } =
+                      await supabase
+                        .from(
+                          'appointments'
+                        )
+                        .update({
+                          status:
+                            a.status ===
+                            'completed'
+                              ? 'pending'
+                              : 'completed',
+                        })
+                        .eq(
+                          'id',
+                          a.id
+                        )
+
+                    if (error) {
+                      alert(
+                        error.message
+                      )
+                      return
+                    }
+
+                    await reload()
+
+                  }}
+                >
+                  {a.status ===
+                  'completed'
+                    ? 'إرجاع'
+                    : 'تم'}
+                </button>
+
+                <button
+                  onClick={() =>
+                    del(
+                      'appointments',
+                      a.id
+                    )
+                  }
+                >
+                  حذف
+                </button>
+
+              </div>
+
+            ))}
+
+          </div>
+
+        </section>
+
+      )}
+
+      {tab === 'clients' && (
+
+        <section className="panel">
+
+          <h2>
+            العملاء
+          </h2>
+
+          <div className="form">
+
+            <input
+              placeholder="اسم العميل"
+              value={client.name}
+              onChange={(e) =>
+                setClient({
+                  ...client,
+                  name:
+                    e.target.value,
+                })
+              }
+            />
+
+            <select
+              value={
+                client.package_id
+              }
+              onChange={(e) =>
+                setClient({
+                  ...client,
+                  package_id:
+                    e.target.value,
+                })
+              }
+            >
+
+              <option value="">
+                اختر الباقة
+              </option>
+
+              {packages.map((p) => (
+
+                <option
+                  key={p.id}
+                  value={p.id}
+                >
+                  {p.name}
+                </option>
+
+              ))}
+
+            </select>
+
+            <input
+              type="date"
+              value={
+                client.start_date
+              }
+              onChange={(e) =>
+                setClient({
+                  ...client,
+                  start_date:
+                    e.target.value,
+                })
+              }
+            />
+
+            <input
+              type="date"
+              value={
+                client.end_date
+              }
+              onChange={(e) =>
+                setClient({
+                  ...client,
+                  end_date:
+                    e.target.value,
+                })
+              }
+            />
+
+            <input
+              type="number"
+              placeholder="قيمة العقد"
+              value={
+                client.contract_value
+              }
+              onChange={(e) =>
+                setClient({
+                  ...client,
+                  contract_value:
+                    e.target.value,
+                })
+              }
+            />
+
+            <input
+              type="number"
+              placeholder="المتبقي"
+              value={
+                client.outstanding
+              }
+              onChange={(e) =>
+                setClient({
+                  ...client,
+                  outstanding:
+                    e.target.value,
+                })
+              }
+            />
+
+            <input
+              placeholder="هاتف"
+              value={client.phone}
+              onChange={(e) =>
+                setClient({
+                  ...client,
+                  phone:
+                    e.target.value,
+                })
+              }
+            />
+
+            <input
+              placeholder="ملاحظات"
+              value={client.notes}
+              onChange={(e) =>
+                setClient({
+                  ...client,
+                  notes:
+                    e.target.value,
+                })
+              }
+            />
+
+            <button
+              onClick={() => {
+
+                const p =
+                  packages.find(
+                    (x) =>
+                      x.id ===
+                      client.package_id
+                  )
+
+                add(
+                  'clients',
+                  {
+                    ...client,
+
+                    package_id:
+                      client.package_id ||
+                      null,
+
+                    package_name:
+                      p?.name ||
+                      null,
+
+                    project_type:
+                      p?.name ===
+                      'WEBSITE'
+                        ? 'website'
+                        : 'social',
+
+                    outstanding:
+                      client.outstanding ===
+                      ''
+                        ? null
+                        : n(
+                            client.outstanding
+                          ),
+
+                    contract_value:
+                      client.contract_value ===
+                      ''
+                        ? null
+                        : n(
+                            client.contract_value
+                          ),
+                  },
+
+                  () =>
+                    setClient({
+                      name: '',
+                      package_id: '',
+                      start_date:
+                        today,
+                      end_date: '',
+                      outstanding:
+                        '',
+                      status:
+                        'active',
+                      notes: '',
+                      phone: '',
+                      contract_value:
+                        '',
+                    })
+                )
+
+              }}
+            >
+              إضافة عميل
+            </button>
+
+          </div>
+
+          <div className="clients">
+
+            {clients.map((c) => (
+
+              <article
+                className="client"
+                key={c.id}
+              >
+
+                <div className="clientTop">
+
+                  <div>
+
+                    <h3>
+                      {c.name}
+                    </h3>
+
+                    <span>
+                      {pack(c)?.name ||
+                        'بدون باقة'}
+                    </span>
+
+                  </div>
+
+                  <div className="score">
+                    {health(c)}
+                  </div>
+
+                </div>
+
+                <p>
+                  {c.start_date ||
+                    '—'}{' '}
+                  →{' '}
+                  {c.end_date ||
+                    '—'}{' '}
+                  • عقد{' '}
+                  {c.contract_value ??
+                    '—'}{' '}
+                  JD • متبقي{' '}
+                  {c.outstanding ??
+                    'غير مسجل'}{' '}
+                  JD
+                </p>
+
+                <button
+                  onClick={() =>
+                    del(
+                      'clients',
+                      c.id
+                    )
+                  }
+                >
+                  حذف العميل
+                </button>
+
+              </article>
+
+            ))}
+
+          </div>
+
+        </section>
+
+      )}
+
+      {tab === 'packages' && (
+
+        <section className="panel">
+
+          <h2>
+            إدارة الباقات
+          </h2>
+
+          <div className="form">
+
+            <input
+              placeholder="اسم الباقة"
+              value={pkg.name}
+              onChange={(e) =>
+                setPkg({
+                  ...pkg,
+                  name:
+                    e.target.value,
+                })
+              }
+            />
+
+            <input
+              type="number"
+              placeholder="السعر"
+              value={pkg.price}
+              onChange={(e) =>
+                setPkg({
+                  ...pkg,
+                  price:
+                    e.target.value,
+                })
+              }
+            />
+
+            <input
+              type="number"
+              placeholder="عدد البوستات"
+              value={
+                pkg.posts_target
+              }
+              onChange={(e) =>
+                setPkg({
+                  ...pkg,
+                  posts_target:
+                    e.target.value,
+                })
+              }
+            />
+
+            <input
+              type="number"
+              placeholder="عدد الريلز"
+              value={
+                pkg.reels_target
+              }
+              onChange={(e) =>
+                setPkg({
+                  ...pkg,
+                  reels_target:
+                    e.target.value,
+                })
+              }
+            />
+
+            <label className="check">
+
+              <input
+                type="checkbox"
+                checked={
+                  pkg.daily_story
+                }
+                onChange={(e) =>
+                  setPkg({
+                    ...pkg,
+                    daily_story:
+                      e.target
+                        .checked,
+                  })
+                }
+              />
+
+              ستوري يومي
+
+            </label>
+
+            <input
+              placeholder="ملاحظات"
+              value={pkg.notes}
+              onChange={(e) =>
+                setPkg({
+                  ...pkg,
+                  notes:
+                    e.target.value,
+                })
+              }
+            />
+
+            <button
+              onClick={() =>
+                add(
+                  'packages',
+
+                  {
+                    name: pkg.name,
+
+                    price:
+                      pkg.price === ''
+                        ? null
+                        : n(
+                            pkg.price
+                          ),
+
+                    posts_target:
+                      n(
+                        pkg.posts_target
+                      ),
+
+                    reels_target:
+                      n(
+                        pkg.reels_target
+                      ),
+
+                    daily_story:
+                      pkg.daily_story,
+
+                    notes:
+                      pkg.notes ||
+                      null,
+                  },
+
+                  () =>
+                    setPkg({
+                      name: '',
+                      price: '',
+                      posts_target:
+                        '0',
+                      reels_target:
+                        '0',
+                      daily_story:
+                        false,
+                      notes: '',
+                    })
+                )
+              }
+            >
+              إضافة باقة
+            </button>
+
+          </div>
+
+          <div className="clients">
+
+            {packages.map((p) => (
+
+              <article
+                className="client"
+                key={p.id}
+              >
+
+                <h3>
+                  {p.name}
+                </h3>
+
+                <p>
+                  {p.price ?? '—'} JD
+                  {' • '}
+                  {p.posts_target} Posts
+                  {' • '}
+                  {p.reels_target} Reels
+                  {' • '}
+                  {p.daily_story
+                    ? 'Daily Story'
+                    : 'No Daily Story'}
+                </p>
+
+                <button
+                  onClick={() =>
+                    del(
+                      'packages',
+                      p.id
+                    )
+                  }
+                >
+                  حذف
+                </button>
+
+              </article>
+
+            ))}
+
+          </div>
+
+        </section>
+
+      )}
+
+      <footer className="ownerFooter">
+
+        <div className="signatureBlock">
+
+          <span className="signatureLabel">
+            Founder & Owner
+          </span>
+
+          <div className="signature">
+            Hatem Al Dasuqi
+          </div>
+
+          <div className="signatureName">
+            HATEM AL DASUQI
+          </div>
+
+          <div className="signatureLine" />
+
+          <small>
+            DH AGENCY
+          </small>
+
+        </div>
+
+      </footer>
+
+    </main>
+  )
+}
