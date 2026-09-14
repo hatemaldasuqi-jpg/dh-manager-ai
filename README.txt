@@ -1,16 +1,12 @@
-DH Manager AI - Full upload pack
+DH Manager AI - Final approved logo package
 
-Upload the included app and public folders to your GitHub repository root.
+Upload/replace these paths in GitHub:
+app/manifest.ts
+public/dh-agency-logo.png
+public/dh-agency-logo.jpeg
+public/icon-192.png
+public/icon-512.png
+public/icon-maskable-512.png
 
-This pack does two things:
-1. Replaces public/dh-agency-logo.jpeg with the exact image you uploaded.
-2. Adds the PWA manifest and Android app icons.
-
-Files:
-- app/manifest.ts
-- public/dh-agency-logo.jpeg
-- public/icon-192.png
-- public/icon-512.png
-- public/icon-maskable-512.png
-
-After Vercel redeploys, the website header logo will use the new uploaded logo because app/page.tsx already references /dh-agency-logo.jpeg.
+The JPEG replacement keeps the current page.tsx working without editing its image path.
+The PNG is included for future transparent-logo use.
