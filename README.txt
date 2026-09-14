@@ -1,19 +1,16 @@
-AI UPDATE — 2 files + 3 small inserts
+DH Manager AI - Full upload pack
 
-Upload:
-app/api/ai/route.ts
-components/DHAIManager.tsx
+Upload the included app and public folders to your GitHub repository root.
 
-In app/page.tsx add at top:
-import DHAIManager from '../components/DHAIManager'
+This pack does two things:
+1. Replaces public/dh-agency-logo.jpeg with the exact image you uploaded.
+2. Adds the PWA manifest and Android app icons.
 
-Inside Home(), after financial totals/goal variables, add:
-const aiContext={today,clients,packages,tasks,contentProgress:progress,financialTransactions:txs,appointments:appts,summary:{income,expenses,netProfit:profit,outstanding,savingsGoal:goal}}
+Files:
+- app/manifest.ts
+- public/dh-agency-logo.jpeg
+- public/icon-192.png
+- public/icon-512.png
+- public/icon-maskable-512.png
 
-Inside the overview section, before Client Health, add:
-<DHAIManager context={aiContext}/>
-
-At the end of app/globals.css add:
-.aiManager p{margin:5px 0 0}.aiQuick{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}.aiAsk{display:grid;grid-template-columns:1fr auto;gap:9px}.aiAsk textarea{width:100%;resize:vertical;background:#0a111f;color:white;border:1px solid #263651;border-radius:12px;padding:12px;font:inherit}.aiAnswer{white-space:pre-wrap;line-height:1.9;background:#08111f;border:1px solid #23436d;border-radius:14px;padding:15px;margin-top:12px}@media(max-width:720px){.aiAsk{grid-template-columns:1fr}.aiAsk button{width:100%}}
-
-Keep OPENAI_API_KEY only in Vercel Secret Environment Variables. Never put it in GitHub or NEXT_PUBLIC_.
+After Vercel redeploys, the website header logo will use the new uploaded logo because app/page.tsx already references /dh-agency-logo.jpeg.
