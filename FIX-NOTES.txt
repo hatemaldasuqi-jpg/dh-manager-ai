@@ -1,0 +1,6 @@
+DH Manager - Date Fix
+- الحقول الفارغة start_date/end_date/due_date ترسل null بدل "".
+- يمنع إرسال تاريخ خارج 1900-2100 أو بصيغة غير YYYY-MM-DD عند التعديل.
+- appointment_time الفارغ يرسل null.
+- لم يتم حذف أو تعديل أي بيانات Supabase تلقائياً.
+- ملف SUPABASE-DATE-CLEANUP.sql اختياري لتنظيف السنوات القديمة بعد أخذ نسخة احتياطية.
