@@ -1,12 +1,2 @@
-DH Manager AI - Final approved logo package
-
-Upload/replace these paths in GitHub:
-app/manifest.ts
-public/dh-agency-logo.png
-public/dh-agency-logo.jpeg
-public/icon-192.png
-public/icon-512.png
-public/icon-maskable-512.png
-
-The JPEG replacement keeps the current page.tsx working without editing its image path.
-The PNG is included for future transparent-logo use.
+DH Manager PRO Black/Blue/Red
+انسخ الملفات فوق نفس المسارات في مشروعك الحالي. اللوجو المرفق هو اللوجو الذي أرسلته. كل أزرار الإضافة والتعديل والحذف ظاهرة لجميع المستخدمين المسجلين. رفع الصور يتطلب bucket باسم dh-manager-media وسياسات Supabase تسمح authenticated upload/update/delete.
