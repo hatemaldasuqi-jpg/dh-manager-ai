@@ -4,7 +4,7 @@ const SYSTEM = `You are DH ADS MEDIA, the paid advertising strategist inside DH 
 Your job is to create practical Meta Ads campaign plans and diagnose campaign performance.
 Be commercially useful, specific, concise, and evidence-aware. Never promise results. Do not invent performance data.
 LANGUAGE RULE: The product is Arabic-first. Understand Modern Standard Arabic and Jordanian/Levantine colloquial Arabic naturally, including mixed Arabic-English advertising terminology. If the user's input is mainly Arabic, every human-readable value in the JSON response MUST be in clear Arabic, while keeping standard ad abbreviations such as CTR, CPM, CPC, CPA, ROAS, Ad Set and Creative in English when useful. If the input is mainly English, answer in English. Never transliterate Arabic into Latin letters.
-For campaign plans, return: objective, campaignStructure, targeting, budget, creatives, copies, testingRule, launchChecklist.
+For campaign plans, return: objective, campaignStructure, targeting, budget, productVisualAnalysis, creatives, copies, testingRule, launchChecklist. If product/service images are supplied, inspect them carefully and ground productVisualAnalysis and creative recommendations in what is actually visible. Read visible packaging/text when legible, but do not invent claims, ingredients, prices, certifications, or features that are not visible or supplied by the user.
 For analysis, use the supplied metrics, explain uncertainty when sample size is weak, and return: action, diagnosis, metrics, nextSteps.
 Prefer testing creative/offer systematically rather than making many simultaneous changes. Output valid JSON only, no markdown.`
 
@@ -20,13 +20,18 @@ export async function POST(req:Request){
     if(!process.env.OPENAI_API_KEY) return NextResponse.json({error:'OPENAI_API_KEY is not configured on Vercel.'},{status:500})
     const body=await req.json()
     const mode=body?.mode==='analyze'?'analyze':'build'
+    const cleanData={...(body.data||{})}
+    const imageUrls=Array.isArray(cleanData.imageUrls)?cleanData.imageUrls.slice(0,4):[]
+    delete cleanData.imageUrls
     const payload=mode==='build'
-      ? `Create a Meta Ads campaign blueprint from this input. Detect the user's language and follow the LANGUAGE RULE exactly:\n${JSON.stringify(body.data||{})}`
-      : `Analyze this Meta Ads campaign. Detect the user's language, follow the LANGUAGE RULE exactly, and base decisions only on the supplied numbers and context:\n${JSON.stringify(body.data||{})}`
+      ? `Create a Meta Ads campaign blueprint from this input. Detect the user's language and follow the LANGUAGE RULE exactly. ${imageUrls.length?'Product/service reference images are attached; analyze them visually and use only visible or user-supplied facts.':''}\n${JSON.stringify(cleanData)}`
+      : `Analyze this Meta Ads campaign. Detect the user's language, follow the LANGUAGE RULE exactly, and base decisions only on the supplied numbers and context:\n${JSON.stringify(cleanData)}`
+    const content:any[]=[{type:'input_text',text:payload}]
+    if(mode==='build') for(const image_url of imageUrls) content.push({type:'input_image',image_url,detail:'high'})
     const r=await fetch('https://api.openai.com/v1/responses',{
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':`Bearer ${process.env.OPENAI_API_KEY}`},
-      body:JSON.stringify({model:process.env.OPENAI_MODEL||'gpt-5.6-luna',instructions:SYSTEM,input:payload,reasoning:{effort:'medium'},max_output_tokens:2200})
+      body:JSON.stringify({model:process.env.OPENAI_MODEL||'gpt-5.6-luna',instructions:SYSTEM,input:[{role:'user',content}],reasoning:{effort:'medium'},max_output_tokens:2600})
     })
     const data=await r.json()
     if(!r.ok) return NextResponse.json({error:data?.error?.message||'OpenAI request failed'},{status:r.status})
