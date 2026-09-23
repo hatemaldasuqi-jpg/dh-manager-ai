@@ -1,0 +1,6 @@
+DH ADS MEDIA — EXACT UI REBUILD
+Reference: EXACT-UI-REFERENCE.jpeg
+Rebuilt app/page.tsx and app/globals.css from the supplied reference.
+Preserved: Supabase auth/data, ad history, OpenAI DH ADS MEDIA API route, DH Vision image inputs.
+No API keys are stored in this ZIP; existing Vercel environment variables remain required.
+Local TypeScript syntax check completed; dependency install was unavailable in the build container, so Vercel will install package.json dependencies during deployment.
