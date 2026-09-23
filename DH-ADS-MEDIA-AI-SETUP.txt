@@ -1,0 +1,12 @@
+DH ADS MEDIA — AI SETUP
+
+1) Copy this overlay over the same paths in your existing DH Manager project.
+2) In Vercel: Project → Settings → Environment Variables.
+3) Add OPENAI_API_KEY = your OpenAI API key. Keep it server-side; never put it in NEXT_PUBLIC_*.
+4) Optional: OPENAI_MODEL = gpt-5.6-luna (default in this build).
+5) Redeploy.
+
+The new server route is: app/api/dh-ads-ai/route.ts
+It calls OpenAI from the server so the API key is not exposed in the browser.
+
+Note: API usage is billed separately according to your OpenAI API account.
