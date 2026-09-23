@@ -80,3 +80,6 @@ begin
     execute format('create policy "auth_all_%s" on public.%I for all to authenticated using (true) with check (true)', t, t);
   end loop;
 end $$;
+
+-- Client branding used by DH Manager dashboard
+alter table public.clients add column if not exists logo_url text;
