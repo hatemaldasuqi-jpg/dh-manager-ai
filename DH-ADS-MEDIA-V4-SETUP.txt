@@ -1,0 +1,14 @@
+DH ADS MEDIA V4 — Persistent History
+
+1) Open Supabase > SQL Editor.
+2) Run the entire file: DH-ADS-MEDIA-HISTORY.sql (one time only).
+3) Deploy/replace the V4 files on Vercel.
+4) Keep the existing OPENAI_API_KEY; no need to recreate it.
+
+What V4 saves automatically:
+- AI campaign input + complete AI result
+- Campaign analysis metrics + complete AI diagnosis
+- Client name, title, date/time and current signed-in user
+
+Inside DH ADS MEDIA use "سجل DH" to open or delete saved items.
+History is stored in Supabase, so refresh/redeploy/device changes do not erase it.
